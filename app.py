@@ -4,7 +4,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify("Backend running on Raspberry Pi")
+    return jsonify("Backend running on Raspberry Pi with CI/CD")
 
 @app.route('/sensor', methods=['POST'])
 def receive_sensor_data():
