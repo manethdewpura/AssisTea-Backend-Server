@@ -19,7 +19,7 @@ def extract_weather_data(weather_data):
 
 @weather_bp.route('/current', methods=['POST'])
 def sync_current_weather():
-    """Sync current weather data to database"""
+    """Sync current weather data to database (keeps only latest record)"""
     try:
         data = request.json
         
@@ -35,13 +35,21 @@ def sync_current_weather():
         # Extract weather condition
         weather_condition = extract_weather_data(weather_data.get('weather', []))
         
-        # Create database record
+        # Delete old current weather records (we only need the latest)
+        location_id = weather_data.get('id')
+        if location_id:
+            WeatherCurrent.query.filter_by(location_id=location_id).delete()
+        else:
+            # If no location_id, delete all (fallback)
+            WeatherCurrent.query.delete()
+        
+        # Create new current weather record
         weather_record = WeatherCurrent(
             timestamp=timestamp,
             coord_lon=weather_data.get('coord', {}).get('lon', 0),
             coord_lat=weather_data.get('coord', {}).get('lat', 0),
             location_name=weather_data.get('name', ''),
-            location_id=weather_data.get('id'),
+            location_id=location_id,
             timezone=weather_data.get('timezone'),
             weather_main=weather_condition['main'],
             weather_description=weather_condition['description'],
@@ -74,7 +82,7 @@ def sync_current_weather():
         
         return jsonify({
             'success': True,
-            'message': 'Current weather data synced successfully',
+            'message': 'Current weather data synced (old records replaced)',
             'syncedAt': int(datetime.utcnow().timestamp() * 1000),
             'recordId': weather_record.id
         }), 200
@@ -89,7 +97,7 @@ def sync_current_weather():
 
 @weather_bp.route('/forecast', methods=['POST'])
 def sync_weather_forecast():
-    """Sync weather forecast data to database"""
+    """Sync weather forecast data to database (UPSERT: Update existing or Insert new)"""
     try:
         data = request.json
         
@@ -105,59 +113,109 @@ def sync_weather_forecast():
         city_data = forecast_data.get('city', {})
         forecast_list = forecast_data.get('list', [])
         
-        records_created = []
+        records_updated = 0
+        records_created = 0
         
-        # Store each forecast item
+        # Store each forecast item with UPSERT logic
         for item in forecast_list:
             weather_condition = extract_weather_data(item.get('weather', []))
             
-            forecast_record = WeatherForecast(
-                timestamp=timestamp,
-                forecast_dt=item.get('dt'),
-                forecast_dt_txt=item.get('dt_txt', ''),
-                city_id=city_data.get('id'),
-                city_name=city_data.get('name', ''),
-                city_country=city_data.get('country', ''),
-                city_coord_lat=city_data.get('coord', {}).get('lat'),
-                city_coord_lon=city_data.get('coord', {}).get('lon'),
-                city_timezone=city_data.get('timezone'),
-                city_sunrise=city_data.get('sunrise'),
-                city_sunset=city_data.get('sunset'),
-                city_population=city_data.get('population'),
-                weather_main=weather_condition['main'],
-                weather_description=weather_condition['description'],
-                weather_icon=weather_condition['icon'],
-                temp=item.get('main', {}).get('temp'),
-                feels_like=item.get('main', {}).get('feels_like'),
-                temp_min=item.get('main', {}).get('temp_min'),
-                temp_max=item.get('main', {}).get('temp_max'),
-                pressure=item.get('main', {}).get('pressure'),
-                humidity=item.get('main', {}).get('humidity'),
-                sea_level=item.get('main', {}).get('sea_level'),
-                grnd_level=item.get('main', {}).get('grnd_level'),
-                wind_speed=item.get('wind', {}).get('speed'),
-                wind_deg=item.get('wind', {}).get('deg'),
-                wind_gust=item.get('wind', {}).get('gust'),
-                visibility=item.get('visibility'),
-                clouds_all=item.get('clouds', {}).get('all'),
-                pop=item.get('pop', 0),
-                rain_1h=item.get('rain', {}).get('1h') if item.get('rain') else None,
-                rain_3h=item.get('rain', {}).get('3h') if item.get('rain') else None,
-                snow_1h=item.get('snow', {}).get('1h') if item.get('snow') else None,
-                snow_3h=item.get('snow', {}).get('3h') if item.get('snow') else None,
-                raw_data=json.dumps(item)
-            )
+            forecast_dt = item.get('dt')
+            city_id = city_data.get('id')
             
-            db.session.add(forecast_record)
-            records_created.append(forecast_record.id)
+            # Check if this forecast already exists
+            existing = WeatherForecast.query.filter_by(
+                city_id=city_id,
+                forecast_dt=forecast_dt
+            ).first()
+            
+            if existing:
+                # UPDATE existing record
+                existing.timestamp = timestamp
+                existing.synced_at = datetime.utcnow()
+                existing.forecast_dt_txt = item.get('dt_txt', '')
+                existing.city_name = city_data.get('name', '')
+                existing.city_country = city_data.get('country', '')
+                existing.city_coord_lat = city_data.get('coord', {}).get('lat')
+                existing.city_coord_lon = city_data.get('coord', {}).get('lon')
+                existing.city_timezone = city_data.get('timezone')
+                existing.city_sunrise = city_data.get('sunrise')
+                existing.city_sunset = city_data.get('sunset')
+                existing.city_population = city_data.get('population')
+                existing.weather_main = weather_condition['main']
+                existing.weather_description = weather_condition['description']
+                existing.weather_icon = weather_condition['icon']
+                existing.temp = item.get('main', {}).get('temp')
+                existing.feels_like = item.get('main', {}).get('feels_like')
+                existing.temp_min = item.get('main', {}).get('temp_min')
+                existing.temp_max = item.get('main', {}).get('temp_max')
+                existing.pressure = item.get('main', {}).get('pressure')
+                existing.humidity = item.get('main', {}).get('humidity')
+                existing.sea_level = item.get('main', {}).get('sea_level')
+                existing.grnd_level = item.get('main', {}).get('grnd_level')
+                existing.wind_speed = item.get('wind', {}).get('speed')
+                existing.wind_deg = item.get('wind', {}).get('deg')
+                existing.wind_gust = item.get('wind', {}).get('gust')
+                existing.visibility = item.get('visibility')
+                existing.clouds_all = item.get('clouds', {}).get('all')
+                existing.pop = item.get('pop', 0)
+                existing.rain_1h = item.get('rain', {}).get('1h') if item.get('rain') else None
+                existing.rain_3h = item.get('rain', {}).get('3h') if item.get('rain') else None
+                existing.snow_1h = item.get('snow', {}).get('1h') if item.get('snow') else None
+                existing.snow_3h = item.get('snow', {}).get('3h') if item.get('snow') else None
+                existing.raw_data = json.dumps(item)
+                
+                records_updated += 1
+            else:
+                # INSERT new record
+                forecast_record = WeatherForecast(
+                    timestamp=timestamp,
+                    forecast_dt=forecast_dt,
+                    forecast_dt_txt=item.get('dt_txt', ''),
+                    city_id=city_id,
+                    city_name=city_data.get('name', ''),
+                    city_country=city_data.get('country', ''),
+                    city_coord_lat=city_data.get('coord', {}).get('lat'),
+                    city_coord_lon=city_data.get('coord', {}).get('lon'),
+                    city_timezone=city_data.get('timezone'),
+                    city_sunrise=city_data.get('sunrise'),
+                    city_sunset=city_data.get('sunset'),
+                    city_population=city_data.get('population'),
+                    weather_main=weather_condition['main'],
+                    weather_description=weather_condition['description'],
+                    weather_icon=weather_condition['icon'],
+                    temp=item.get('main', {}).get('temp'),
+                    feels_like=item.get('main', {}).get('feels_like'),
+                    temp_min=item.get('main', {}).get('temp_min'),
+                    temp_max=item.get('main', {}).get('temp_max'),
+                    pressure=item.get('main', {}).get('pressure'),
+                    humidity=item.get('main', {}).get('humidity'),
+                    sea_level=item.get('main', {}).get('sea_level'),
+                    grnd_level=item.get('main', {}).get('grnd_level'),
+                    wind_speed=item.get('wind', {}).get('speed'),
+                    wind_deg=item.get('wind', {}).get('deg'),
+                    wind_gust=item.get('wind', {}).get('gust'),
+                    visibility=item.get('visibility'),
+                    clouds_all=item.get('clouds', {}).get('all'),
+                    pop=item.get('pop', 0),
+                    rain_1h=item.get('rain', {}).get('1h') if item.get('rain') else None,
+                    rain_3h=item.get('rain', {}).get('3h') if item.get('rain') else None,
+                    snow_1h=item.get('snow', {}).get('1h') if item.get('snow') else None,
+                    snow_3h=item.get('snow', {}).get('3h') if item.get('snow') else None,
+                    raw_data=json.dumps(item)
+                )
+                
+                db.session.add(forecast_record)
+                records_created += 1
         
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'message': f'Weather forecast data synced successfully ({len(records_created)} records)',
+            'message': f'Forecast synced: {records_created} created, {records_updated} updated',
             'syncedAt': int(datetime.utcnow().timestamp() * 1000),
-            'recordsCreated': len(records_created)
+            'recordsCreated': records_created,
+            'recordsUpdated': records_updated
         }), 200
         
     except Exception as e:
@@ -193,12 +251,19 @@ def sync_all_weather_data():
         if current_data:
             weather_condition = extract_weather_data(current_data.get('weather', []))
             
+            # Delete old current weather records (we only need the latest)
+            location_id = current_data.get('id')
+            if location_id:
+                WeatherCurrent.query.filter_by(location_id=location_id).delete()
+            else:
+                WeatherCurrent.query.delete()
+            
             weather_record = WeatherCurrent(
                 timestamp=timestamp,
                 coord_lon=current_data.get('coord', {}).get('lon', 0),
                 coord_lat=current_data.get('coord', {}).get('lat', 0),
                 location_name=current_data.get('name', ''),
-                location_id=current_data.get('id'),
+                location_id=location_id,
                 timezone=current_data.get('timezone'),
                 weather_main=weather_condition['main'],
                 weather_description=weather_condition['description'],
@@ -234,51 +299,105 @@ def sync_all_weather_data():
             city_data = forecast_data.get('city', {})
             forecast_list = forecast_data.get('list', [])
             
-            forecast_count = 0
+            forecast_created = 0
+            forecast_updated = 0
+            
             for item in forecast_list:
                 weather_condition = extract_weather_data(item.get('weather', []))
                 
-                forecast_record = WeatherForecast(
-                    timestamp=timestamp,
-                    forecast_dt=item.get('dt'),
-                    forecast_dt_txt=item.get('dt_txt', ''),
-                    city_id=city_data.get('id'),
-                    city_name=city_data.get('name', ''),
-                    city_country=city_data.get('country', ''),
-                    city_coord_lat=city_data.get('coord', {}).get('lat'),
-                    city_coord_lon=city_data.get('coord', {}).get('lon'),
-                    city_timezone=city_data.get('timezone'),
-                    city_sunrise=city_data.get('sunrise'),
-                    city_sunset=city_data.get('sunset'),
-                    city_population=city_data.get('population'),
-                    weather_main=weather_condition['main'],
-                    weather_description=weather_condition['description'],
-                    weather_icon=weather_condition['icon'],
-                    temp=item.get('main', {}).get('temp'),
-                    feels_like=item.get('main', {}).get('feels_like'),
-                    temp_min=item.get('main', {}).get('temp_min'),
-                    temp_max=item.get('main', {}).get('temp_max'),
-                    pressure=item.get('main', {}).get('pressure'),
-                    humidity=item.get('main', {}).get('humidity'),
-                    sea_level=item.get('main', {}).get('sea_level'),
-                    grnd_level=item.get('main', {}).get('grnd_level'),
-                    wind_speed=item.get('wind', {}).get('speed'),
-                    wind_deg=item.get('wind', {}).get('deg'),
-                    wind_gust=item.get('wind', {}).get('gust'),
-                    visibility=item.get('visibility'),
-                    clouds_all=item.get('clouds', {}).get('all'),
-                    pop=item.get('pop', 0),
-                    rain_1h=item.get('rain', {}).get('1h') if item.get('rain') else None,
-                    rain_3h=item.get('rain', {}).get('3h') if item.get('rain') else None,
-                    snow_1h=item.get('snow', {}).get('1h') if item.get('snow') else None,
-                    snow_3h=item.get('snow', {}).get('3h') if item.get('snow') else None,
-                    raw_data=json.dumps(item)
-                )
+                forecast_dt = item.get('dt')
+                city_id = city_data.get('id')
                 
-                db.session.add(forecast_record)
-                forecast_count += 1
+                # Check if this forecast already exists
+                existing = WeatherForecast.query.filter_by(
+                    city_id=city_id,
+                    forecast_dt=forecast_dt
+                ).first()
+                
+                if existing:
+                    # UPDATE existing record
+                    existing.timestamp = timestamp
+                    existing.synced_at = datetime.utcnow()
+                    existing.forecast_dt_txt = item.get('dt_txt', '')
+                    existing.city_name = city_data.get('name', '')
+                    existing.city_country = city_data.get('country', '')
+                    existing.city_coord_lat = city_data.get('coord', {}).get('lat')
+                    existing.city_coord_lon = city_data.get('coord', {}).get('lon')
+                    existing.city_timezone = city_data.get('timezone')
+                    existing.city_sunrise = city_data.get('sunrise')
+                    existing.city_sunset = city_data.get('sunset')
+                    existing.city_population = city_data.get('population')
+                    existing.weather_main = weather_condition['main']
+                    existing.weather_description = weather_condition['description']
+                    existing.weather_icon = weather_condition['icon']
+                    existing.temp = item.get('main', {}).get('temp')
+                    existing.feels_like = item.get('main', {}).get('feels_like')
+                    existing.temp_min = item.get('main', {}).get('temp_min')
+                    existing.temp_max = item.get('main', {}).get('temp_max')
+                    existing.pressure = item.get('main', {}).get('pressure')
+                    existing.humidity = item.get('main', {}).get('humidity')
+                    existing.sea_level = item.get('main', {}).get('sea_level')
+                    existing.grnd_level = item.get('main', {}).get('grnd_level')
+                    existing.wind_speed = item.get('wind', {}).get('speed')
+                    existing.wind_deg = item.get('wind', {}).get('deg')
+                    existing.wind_gust = item.get('wind', {}).get('gust')
+                    existing.visibility = item.get('visibility')
+                    existing.clouds_all = item.get('clouds', {}).get('all')
+                    existing.pop = item.get('pop', 0)
+                    existing.rain_1h = item.get('rain', {}).get('1h') if item.get('rain') else None
+                    existing.rain_3h = item.get('rain', {}).get('3h') if item.get('rain') else None
+                    existing.snow_1h = item.get('snow', {}).get('1h') if item.get('snow') else None
+                    existing.snow_3h = item.get('snow', {}).get('3h') if item.get('snow') else None
+                    existing.raw_data = json.dumps(item)
+                    
+                    forecast_updated += 1
+                else:
+                    # INSERT new record
+                    forecast_record = WeatherForecast(
+                        timestamp=timestamp,
+                        forecast_dt=forecast_dt,
+                        forecast_dt_txt=item.get('dt_txt', ''),
+                        city_id=city_id,
+                        city_name=city_data.get('name', ''),
+                        city_country=city_data.get('country', ''),
+                        city_coord_lat=city_data.get('coord', {}).get('lat'),
+                        city_coord_lon=city_data.get('coord', {}).get('lon'),
+                        city_timezone=city_data.get('timezone'),
+                        city_sunrise=city_data.get('sunrise'),
+                        city_sunset=city_data.get('sunset'),
+                        city_population=city_data.get('population'),
+                        weather_main=weather_condition['main'],
+                        weather_description=weather_condition['description'],
+                        weather_icon=weather_condition['icon'],
+                        temp=item.get('main', {}).get('temp'),
+                        feels_like=item.get('main', {}).get('feels_like'),
+                        temp_min=item.get('main', {}).get('temp_min'),
+                        temp_max=item.get('main', {}).get('temp_max'),
+                        pressure=item.get('main', {}).get('pressure'),
+                        humidity=item.get('main', {}).get('humidity'),
+                        sea_level=item.get('main', {}).get('sea_level'),
+                        grnd_level=item.get('main', {}).get('grnd_level'),
+                        wind_speed=item.get('wind', {}).get('speed'),
+                        wind_deg=item.get('wind', {}).get('deg'),
+                        wind_gust=item.get('wind', {}).get('gust'),
+                        visibility=item.get('visibility'),
+                        clouds_all=item.get('clouds', {}).get('all'),
+                        pop=item.get('pop', 0),
+                        rain_1h=item.get('rain', {}).get('1h') if item.get('rain') else None,
+                        rain_3h=item.get('rain', {}).get('3h') if item.get('rain') else None,
+                        snow_1h=item.get('snow', {}).get('1h') if item.get('snow') else None,
+                        snow_3h=item.get('snow', {}).get('3h') if item.get('snow') else None,
+                        raw_data=json.dumps(item)
+                    )
+                    
+                    db.session.add(forecast_record)
+                    forecast_created += 1
             
-            results['forecast'] = {'count': forecast_count, 'success': True}
+            results['forecast'] = {
+                'created': forecast_created,
+                'updated': forecast_updated,
+                'success': True
+            }
         
         db.session.commit()
         

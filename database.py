@@ -153,6 +153,11 @@ class WeatherForecast(db.Model):
     # Store full JSON for flexibility
     raw_data = db.Column(db.Text)
     
+    # Unique constraint: prevent duplicate forecasts for same city and forecast time
+    __table_args__ = (
+        db.UniqueConstraint('city_id', 'forecast_dt', name='uix_city_forecast_dt'),
+    )
+    
     def to_dict(self):
         """Convert model to dictionary"""
         return {

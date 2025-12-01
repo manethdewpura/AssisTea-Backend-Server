@@ -1,9 +1,13 @@
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from database import db, init_db
 from weather_routes import weather_bp
 import os
 
 app = Flask(__name__)
+
+# Enable CORS for all routes
+CORS(app)
 
 # Configure SQLite database
 basedir = os.path.abspath(os.path.dirname(__file__))
