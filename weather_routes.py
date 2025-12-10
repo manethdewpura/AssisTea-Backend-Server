@@ -1,6 +1,7 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from database import db, WeatherCurrent, WeatherForecast
+from sqlalchemy.exc import IntegrityError
 import json
 
 weather_bp = Blueprint('weather', __name__, url_prefix='/weather')
@@ -91,7 +92,7 @@ def sync_current_weather():
         db.session.rollback()
         return jsonify({
             'success': False,
-            'message': f'Error syncing current weather: {str(e)}'
+            'message': 'An error occurred while syncing current weather data'
         }), 500
 
 
@@ -116,18 +117,22 @@ def sync_weather_forecast():
         records_updated = 0
         records_created = 0
         
+        # Batch-load all existing forecasts for this city
+        city_id = city_data.get('id')
+        
+        existing_forecasts = {
+            f.forecast_dt: f 
+            for f in WeatherForecast.query.filter_by(city_id=city_id).all()
+        }
+        
         # Store each forecast item with UPSERT logic
         for item in forecast_list:
             weather_condition = extract_weather_data(item.get('weather', []))
             
             forecast_dt = item.get('dt')
-            city_id = city_data.get('id')
             
-            # Check if this forecast already exists
-            existing = WeatherForecast.query.filter_by(
-                city_id=city_id,
-                forecast_dt=forecast_dt
-            ).first()
+            # Use dictionary lookup instead of querying in the loop
+            existing = existing_forecasts.get(forecast_dt)
             
             if existing:
                 # UPDATE existing record
@@ -208,7 +213,13 @@ def sync_weather_forecast():
                 db.session.add(forecast_record)
                 records_created += 1
         
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            # Handle race condition: another request may have inserted the same forecast
+            current_app.logger.warning('Duplicate forecast detected during commit, handling gracefully')
+            db.session.commit()
         
         return jsonify({
             'success': True,
@@ -222,7 +233,7 @@ def sync_weather_forecast():
         db.session.rollback()
         return jsonify({
             'success': False,
-            'message': f'Error syncing weather forecast: {str(e)}'
+            'message': 'An error occurred while syncing forecast data'
         }), 500
 
 
@@ -302,17 +313,21 @@ def sync_all_weather_data():
             forecast_created = 0
             forecast_updated = 0
             
+            city_id = city_data.get('id')
+            
+            # Batch-load all existing forecasts for this city
+            existing_forecasts = {
+                f.forecast_dt: f 
+                for f in WeatherForecast.query.filter_by(city_id=city_id).all()
+            }
+            
             for item in forecast_list:
                 weather_condition = extract_weather_data(item.get('weather', []))
                 
                 forecast_dt = item.get('dt')
-                city_id = city_data.get('id')
                 
-                # Check if this forecast already exists
-                existing = WeatherForecast.query.filter_by(
-                    city_id=city_id,
-                    forecast_dt=forecast_dt
-                ).first()
+                # Use dictionary lookup instead of querying in the loop
+                existing = existing_forecasts.get(forecast_dt)
                 
                 if existing:
                     # UPDATE existing record
@@ -399,20 +414,32 @@ def sync_all_weather_data():
                 'success': True
             }
         
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Weather data synced successfully',
-            'syncedAt': int(datetime.utcnow().timestamp() * 1000),
-            'results': results
-        }), 200
+        # Only commit if there's actual data to sync
+        if current_data or forecast_data:
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                # Handle race condition: another request may have inserted the same forecast
+                current_app.logger.warning('Duplicate forecast detected during sync commit, handling gracefully')
+                db.session.commit()
+            return jsonify({
+                'success': True,
+                'message': 'Weather data synced successfully',
+                'syncedAt': int(datetime.utcnow().timestamp() * 1000),
+                'results': results
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No data provided to sync'
+            }), 400
         
     except Exception as e:
         db.session.rollback()
         return jsonify({
             'success': False,
-            'message': f'Error syncing weather data: {str(e)}'
+            'message': 'An error occurred while syncing weather data'
         }), 500
 
 
@@ -436,7 +463,7 @@ def get_latest_current_weather():
     except Exception as e:
         return jsonify({
             'success': False,
-            'message': f'Error retrieving weather data: {str(e)}'
+            'message': 'An error occurred while retrieving weather data'
         }), 500
 
 
@@ -467,19 +494,20 @@ def get_latest_forecast():
         forecast_list = []
         
         for forecast in forecasts:
+            forecast_dict = forecast.to_dict()
             if not city_data:
-                city_data = forecast.to_dict()['city']
+                city_data = forecast_dict['city']
             forecast_list.append({
                 'dt': forecast.forecast_dt,
                 'dt_txt': forecast.forecast_dt_txt,
-                'main': forecast.to_dict()['main'],
-                'weather': [forecast.to_dict()['weather']],
-                'clouds': forecast.to_dict()['clouds'],
-                'wind': forecast.to_dict()['wind'],
-                'visibility': forecast.to_dict()['visibility'],
-                'pop': forecast.to_dict()['pop'],
-                'rain': forecast.to_dict()['rain'],
-                'snow': forecast.to_dict()['snow']
+                'main': forecast_dict['main'],
+                'weather': [forecast_dict['weather']],
+                'clouds': forecast_dict['clouds'],
+                'wind': forecast_dict['wind'],
+                'visibility': forecast_dict['visibility'],
+                'pop': forecast_dict['pop'],
+                'rain': forecast_dict['rain'],
+                'snow': forecast_dict['snow']
             })
         
         return jsonify({
@@ -496,6 +524,6 @@ def get_latest_forecast():
     except Exception as e:
         return jsonify({
             'success': False,
-            'message': f'Error retrieving forecast data: {str(e)}'
+            'message': 'An error occurred while retrieving forecast data'
         }), 500
 
