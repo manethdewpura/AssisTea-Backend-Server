@@ -2,7 +2,15 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from database import db, init_db
 from weather_routes import weather_bp
+from ml_background_task import init_background_task
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 app = Flask(__name__)
 
@@ -22,6 +30,14 @@ init_db(app)
 
 # Register blueprints
 app.register_blueprint(weather_bp)
+
+# Initialize ML background task (checks for stale data every 30 minutes)
+# This will automatically generate ML predictions when data is stale
+try:
+    init_background_task(app, check_interval_seconds=1800)  # 30 minutes
+    logging.info("✓ ML background task initialized")
+except Exception as e:
+    logging.warning(f"ML background task not available: {e}")
 
 @app.route('/')
 def home():
