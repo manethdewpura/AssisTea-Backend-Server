@@ -60,87 +60,61 @@ class MLBackgroundTask:
                 logger.error(f"Error in background ML check: {e}", exc_info=True)
     
     def _generate_predictions(self):
-        """Generate ML predictions using historical data"""
+        """Generate ML predictions using historical weather data"""
         try:
             predictor = get_predictor()
             if not predictor:
                 logger.warning("ML predictor not available, skipping prediction")
                 return
             
-            # Get historical data
-            historical_forecasts = WeatherForecast.query.order_by(
-                WeatherForecast.forecast_dt.asc()
-            ).limit(50).all()
+            # Get historical weather data from weather_current table (last 48+ hours)
+            # Use measured_at (actual weather time) instead of timestamp (sync time)
+            cutoff_timestamp = int((datetime.utcnow() - timedelta(hours=48)).timestamp() * 1000)
+            historical_current = WeatherCurrent.query.filter(
+                WeatherCurrent.measured_at >= cutoff_timestamp
+            ).order_by(WeatherCurrent.measured_at.asc()).all()
             
-            latest_current = WeatherCurrent.query.order_by(
-                WeatherCurrent.timestamp.desc()
-            ).first()
-            
-            if not historical_forecasts and not latest_current:
-                logger.warning("No historical data available for ML prediction")
+            if not historical_current or len(historical_current) < 16:
+                logger.warning(f"Insufficient historical data: need at least 48 hours of actual weather data, got {len(historical_current)} records")
                 return
             
-            # Build historical data list
+            # Build historical data list from weather records
+            # Use measured_at (actual weather time) for prediction input
             historical_data = []
-            
-            for forecast in historical_forecasts:
+            for current in historical_current:
                 historical_data.append({
-                    'timestamp': forecast.timestamp,
-                    'temp': forecast.temp,
-                    'feels_like': forecast.feels_like,
-                    'temp_min': forecast.temp_min,
-                    'temp_max': forecast.temp_max,
-                    'pressure': forecast.pressure,
-                    'humidity': forecast.humidity,
-                    'wind_speed': forecast.wind_speed,
-                    'wind_deg': forecast.wind_deg,
-                    'rain_1h': forecast.rain_1h or 0.0,
-                    'rain_3h': forecast.rain_3h or 0.0,
-                    'clouds_all': forecast.clouds_all or 0,
+                    'timestamp': current.measured_at or current.timestamp,  # Prefer measured_at, fallback to timestamp
+                    'temp': current.temp,
+                    'feels_like': current.feels_like,
+                    'temp_min': current.temp_min,
+                    'temp_max': current.temp_max,
+                    'pressure': current.pressure,
+                    'humidity': current.humidity,
+                    'wind_speed': current.wind_speed,
+                    'wind_deg': current.wind_deg,
+                    'rain_1h': current.rain_1h or 0.0,
+                    'rain_3h': current.rain_3h or 0.0,
+                    'clouds_all': current.clouds_all or 0,
                 })
             
-            if latest_current:
-                historical_data.append({
-                    'timestamp': latest_current.timestamp,
-                    'temp': latest_current.temp,
-                    'feels_like': latest_current.feels_like,
-                    'temp_min': latest_current.temp_min,
-                    'temp_max': latest_current.temp_max,
-                    'pressure': latest_current.pressure,
-                    'humidity': latest_current.humidity,
-                    'wind_speed': latest_current.wind_speed,
-                    'wind_deg': latest_current.wind_deg,
-                    'rain_1h': latest_current.rain_1h or 0.0,
-                    'rain_3h': latest_current.rain_3h or 0.0,
-                    'clouds_all': latest_current.clouds_all or 0,
-                })
+            # Take last 48 hours (or available data)
+            if len(historical_data) > predictor.lookback_hours:
+                historical_data = historical_data[-predictor.lookback_hours:]
             
-            if len(historical_data) < 48:
-                logger.warning(f"Insufficient historical data: need 48 hours, got {len(historical_data)} records")
+            if len(historical_data) < predictor.lookback_hours:
+                logger.warning(f"Insufficient historical data: need {predictor.lookback_hours} hours, got {len(historical_data)} records")
                 return
             
             # Generate predictions
             predicted_records = predictor.predict(historical_data)
             
-            # Get city info
-            city_id = None
-            city_name = None
-            city_country = None
-            city_coord_lat = None
-            city_coord_lon = None
-            
-            if historical_forecasts:
-                latest_forecast = historical_forecasts[-1]
-                city_id = latest_forecast.city_id
-                city_name = latest_forecast.city_name
-                city_country = latest_forecast.city_country
-                city_coord_lat = latest_forecast.city_coord_lat
-                city_coord_lon = latest_forecast.city_coord_lon
-            elif latest_current:
-                city_id = latest_current.location_id
-                city_name = latest_current.location_name
-                city_coord_lat = latest_current.coord_lat
-                city_coord_lon = latest_current.coord_lon
+            # Get city info from latest current weather record
+            latest_current = historical_current[-1]
+            city_id = latest_current.location_id
+            city_name = latest_current.location_name
+            city_country = latest_current.country or ''
+            city_coord_lat = latest_current.coord_lat
+            city_coord_lon = latest_current.coord_lon
             
             # Store predictions
             timestamp = int(datetime.utcnow().timestamp() * 1000)

@@ -10,8 +10,9 @@ class WeatherCurrent(db.Model):
     __tablename__ = 'weather_current'
     
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.BigInteger, nullable=False, index=True)
-    synced_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = db.Column(db.BigInteger, nullable=False, index=True)  # Sync timestamp (when data was sent to backend)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)  # When record was saved to database
+    measured_at = db.Column(db.BigInteger, nullable=True, index=True)  # Actual weather measurement time (dt from API)
     
     # Location data
     coord_lon = db.Column(db.Float, nullable=False)
@@ -32,8 +33,6 @@ class WeatherCurrent(db.Model):
     temp_max = db.Column(db.Float)
     pressure = db.Column(db.Float)
     humidity = db.Column(db.Float)
-    sea_level = db.Column(db.Float, nullable=True)
-    grnd_level = db.Column(db.Float, nullable=True)
     
     # Wind data
     wind_speed = db.Column(db.Float)
@@ -45,23 +44,25 @@ class WeatherCurrent(db.Model):
     clouds_all = db.Column(db.Integer)
     rain_1h = db.Column(db.Float, nullable=True)
     rain_3h = db.Column(db.Float, nullable=True)
-    snow_1h = db.Column(db.Float, nullable=True)
-    snow_3h = db.Column(db.Float, nullable=True)
     
     # System data
     country = db.Column(db.String(10))
-    sunrise = db.Column(db.BigInteger)
-    sunset = db.Column(db.BigInteger)
     
     # Store full JSON for flexibility
     raw_data = db.Column(db.Text)
+    
+    # Unique constraint: prevent duplicate records for same location and measurement time
+    __table_args__ = (
+        db.UniqueConstraint('location_id', 'measured_at', name='uix_location_measured_at'),
+    )
     
     def to_dict(self):
         """Convert model to dictionary"""
         return {
             'id': self.id,
-            'timestamp': self.timestamp,
-            'synced_at': self.synced_at.isoformat() if self.synced_at else None,
+            'timestamp': self.timestamp,  # Sync timestamp
+            'synced_at': self.synced_at.isoformat() if self.synced_at else None,  # Database save time
+            'measured_at': self.measured_at,  # Actual weather measurement time (dt from API)
             'coord': {'lon': self.coord_lon, 'lat': self.coord_lat},
             'location_name': self.location_name,
             'location_id': self.location_id,
@@ -77,9 +78,7 @@ class WeatherCurrent(db.Model):
                 'temp_min': self.temp_min,
                 'temp_max': self.temp_max,
                 'pressure': self.pressure,
-                'humidity': self.humidity,
-                'sea_level': self.sea_level,
-                'grnd_level': self.grnd_level
+                'humidity': self.humidity
             },
             'wind': {
                 'speed': self.wind_speed,
@@ -89,11 +88,8 @@ class WeatherCurrent(db.Model):
             'visibility': self.visibility,
             'clouds': {'all': self.clouds_all},
             'rain': {'1h': self.rain_1h, '3h': self.rain_3h} if self.rain_1h or self.rain_3h else None,
-            'snow': {'1h': self.snow_1h, '3h': self.snow_3h} if self.snow_1h or self.snow_3h else None,
             'sys': {
-                'country': self.country,
-                'sunrise': self.sunrise,
-                'sunset': self.sunset
+                'country': self.country
             }
         }
 
@@ -113,8 +109,6 @@ class WeatherForecast(db.Model):
     city_coord_lat = db.Column(db.Float)
     city_coord_lon = db.Column(db.Float)
     city_timezone = db.Column(db.Integer)
-    city_sunrise = db.Column(db.BigInteger)
-    city_sunset = db.Column(db.BigInteger)
     city_population = db.Column(db.Integer)
     
     # Forecast item data
@@ -133,8 +127,6 @@ class WeatherForecast(db.Model):
     temp_max = db.Column(db.Float)
     pressure = db.Column(db.Float)
     humidity = db.Column(db.Float)
-    sea_level = db.Column(db.Float, nullable=True)
-    grnd_level = db.Column(db.Float, nullable=True)
     
     # Wind data
     wind_speed = db.Column(db.Float)
@@ -147,8 +139,6 @@ class WeatherForecast(db.Model):
     pop = db.Column(db.Float)  # Probability of precipitation
     rain_1h = db.Column(db.Float, nullable=True)
     rain_3h = db.Column(db.Float, nullable=True)
-    snow_1h = db.Column(db.Float, nullable=True)
-    snow_3h = db.Column(db.Float, nullable=True)
     
     # Store full JSON for flexibility
     raw_data = db.Column(db.Text)
@@ -172,8 +162,6 @@ class WeatherForecast(db.Model):
                 'country': self.city_country,
                 'coord': {'lat': self.city_coord_lat, 'lon': self.city_coord_lon},
                 'timezone': self.city_timezone,
-                'sunrise': self.city_sunrise,
-                'sunset': self.city_sunset,
                 'population': self.city_population
             },
             'weather': {
@@ -187,9 +175,7 @@ class WeatherForecast(db.Model):
                 'temp_min': self.temp_min,
                 'temp_max': self.temp_max,
                 'pressure': self.pressure,
-                'humidity': self.humidity,
-                'sea_level': self.sea_level,
-                'grnd_level': self.grnd_level
+                'humidity': self.humidity
             },
             'wind': {
                 'speed': self.wind_speed,
@@ -199,8 +185,7 @@ class WeatherForecast(db.Model):
             'visibility': self.visibility,
             'clouds': {'all': self.clouds_all},
             'pop': self.pop,
-            'rain': {'1h': self.rain_1h, '3h': self.rain_3h} if self.rain_1h or self.rain_3h else None,
-            'snow': {'1h': self.snow_1h, '3h': self.snow_3h} if self.snow_1h or self.snow_3h else None
+            'rain': {'1h': self.rain_1h, '3h': self.rain_3h} if self.rain_1h or self.rain_3h else None
         }
 
 

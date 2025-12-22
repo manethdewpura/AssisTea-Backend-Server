@@ -23,7 +23,7 @@ def extract_weather_data(weather_data):
 
 @weather_bp.route('/current', methods=['POST'])
 def sync_current_weather():
-    """Sync current weather data to database (keeps only latest record)"""
+    """Sync current weather data to database (appends records to maintain historical data)"""
     try:
         data = request.json
         
@@ -34,22 +34,83 @@ def sync_current_weather():
             }), 400
         
         weather_data = data['data']
-        timestamp = data.get('timestamp', int(datetime.utcnow().timestamp() * 1000))
+        timestamp = data.get('timestamp', int(datetime.utcnow().timestamp() * 1000))  # Sync timestamp from mobile app
+        
+        # Extract actual weather measurement time from API (dt field)
+        # dt is in seconds, convert to milliseconds to match timestamp format
+        measured_at = weather_data.get('dt')
+        if measured_at:
+            measured_at_ms = int(measured_at * 1000)  # Convert seconds to milliseconds
+        else:
+            # Fallback: use current time if dt not available
+            measured_at_ms = int(datetime.utcnow().timestamp() * 1000)
         
         # Extract weather condition
         weather_condition = extract_weather_data(weather_data.get('weather', []))
         
-        # Delete old current weather records (we only need the latest)
         location_id = weather_data.get('id')
-        if location_id:
-            WeatherCurrent.query.filter_by(location_id=location_id).delete()
-        else:
-            # If no location_id, delete all (fallback)
-            WeatherCurrent.query.delete()
         
-        # Create new current weather record
+        # Check for duplicate: same location and same measurement time (within 1 hour window)
+        # This prevents storing duplicate records from multiple simultaneous API calls
+        time_window_ms = 3600000  # 1 hour in milliseconds
+        existing_record = WeatherCurrent.query.filter_by(
+            location_id=location_id
+        ).filter(
+            db.func.abs(WeatherCurrent.measured_at - measured_at_ms) < time_window_ms
+        ).first()
+        
+        if existing_record:
+            # Update existing record instead of creating duplicate
+            existing_record.timestamp = timestamp
+            existing_record.synced_at = datetime.utcnow()
+            existing_record.measured_at = measured_at_ms
+            existing_record.coord_lon = weather_data.get('coord', {}).get('lon', 0)
+            existing_record.coord_lat = weather_data.get('coord', {}).get('lat', 0)
+            existing_record.location_name = weather_data.get('name', '')
+            existing_record.timezone = weather_data.get('timezone')
+            existing_record.weather_main = weather_condition['main']
+            existing_record.weather_description = weather_condition['description']
+            existing_record.weather_icon = weather_condition['icon']
+            existing_record.temp = weather_data.get('main', {}).get('temp')
+            existing_record.feels_like = weather_data.get('main', {}).get('feels_like')
+            existing_record.temp_min = weather_data.get('main', {}).get('temp_min')
+            existing_record.temp_max = weather_data.get('main', {}).get('temp_max')
+            existing_record.pressure = weather_data.get('main', {}).get('pressure')
+            existing_record.humidity = weather_data.get('main', {}).get('humidity')
+            existing_record.wind_speed = weather_data.get('wind', {}).get('speed')
+            existing_record.wind_deg = weather_data.get('wind', {}).get('deg')
+            existing_record.wind_gust = weather_data.get('wind', {}).get('gust')
+            existing_record.visibility = weather_data.get('visibility')
+            existing_record.clouds_all = weather_data.get('clouds', {}).get('all')
+            existing_record.rain_1h = weather_data.get('rain', {}).get('1h') if weather_data.get('rain') else None
+            existing_record.rain_3h = weather_data.get('rain', {}).get('3h') if weather_data.get('rain') else None
+            existing_record.country = weather_data.get('sys', {}).get('country', '')
+            existing_record.raw_data = json.dumps(weather_data)
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Current weather data updated (duplicate prevented)',
+                'syncedAt': int(datetime.utcnow().timestamp() * 1000),
+                'recordId': existing_record.id,
+                'isUpdate': True
+            }), 200
+        
+        # Clean up old records (keep last 10 days for efficiency)
+        # This prevents database from growing indefinitely
+        cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
+        if location_id:
+            WeatherCurrent.query.filter_by(location_id=location_id).filter(
+                WeatherCurrent.timestamp < cutoff_time
+            ).delete()
+        else:
+            WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete()
+        
+        # Create new current weather record (append, don't replace)
         weather_record = WeatherCurrent(
-            timestamp=timestamp,
+            timestamp=timestamp,  # Sync timestamp
+            measured_at=measured_at_ms,  # Actual weather measurement time
             coord_lon=weather_data.get('coord', {}).get('lon', 0),
             coord_lat=weather_data.get('coord', {}).get('lat', 0),
             location_name=weather_data.get('name', ''),
@@ -64,8 +125,6 @@ def sync_current_weather():
             temp_max=weather_data.get('main', {}).get('temp_max'),
             pressure=weather_data.get('main', {}).get('pressure'),
             humidity=weather_data.get('main', {}).get('humidity'),
-            sea_level=weather_data.get('main', {}).get('sea_level'),
-            grnd_level=weather_data.get('main', {}).get('grnd_level'),
             wind_speed=weather_data.get('wind', {}).get('speed'),
             wind_deg=weather_data.get('wind', {}).get('deg'),
             wind_gust=weather_data.get('wind', {}).get('gust'),
@@ -73,11 +132,7 @@ def sync_current_weather():
             clouds_all=weather_data.get('clouds', {}).get('all'),
             rain_1h=weather_data.get('rain', {}).get('1h') if weather_data.get('rain') else None,
             rain_3h=weather_data.get('rain', {}).get('3h') if weather_data.get('rain') else None,
-            snow_1h=weather_data.get('snow', {}).get('1h') if weather_data.get('snow') else None,
-            snow_3h=weather_data.get('snow', {}).get('3h') if weather_data.get('snow') else None,
             country=weather_data.get('sys', {}).get('country', ''),
-            sunrise=weather_data.get('sys', {}).get('sunrise'),
-            sunset=weather_data.get('sys', {}).get('sunset'),
             raw_data=json.dumps(weather_data)
         )
         
@@ -86,7 +141,7 @@ def sync_current_weather():
         
         return jsonify({
             'success': True,
-            'message': 'Current weather data synced (old records replaced)',
+            'message': 'Current weather data synced (historical data maintained)',
             'syncedAt': int(datetime.utcnow().timestamp() * 1000),
             'recordId': weather_record.id
         }), 200
@@ -143,8 +198,6 @@ def sync_weather_forecast():
                 existing.city_coord_lat = city_data.get('coord', {}).get('lat')
                 existing.city_coord_lon = city_data.get('coord', {}).get('lon')
                 existing.city_timezone = city_data.get('timezone')
-                existing.city_sunrise = city_data.get('sunrise')
-                existing.city_sunset = city_data.get('sunset')
                 existing.city_population = city_data.get('population')
                 existing.weather_main = weather_condition['main']
                 existing.weather_description = weather_condition['description']
@@ -155,8 +208,6 @@ def sync_weather_forecast():
                 existing.temp_max = item.get('main', {}).get('temp_max')
                 existing.pressure = item.get('main', {}).get('pressure')
                 existing.humidity = item.get('main', {}).get('humidity')
-                existing.sea_level = item.get('main', {}).get('sea_level')
-                existing.grnd_level = item.get('main', {}).get('grnd_level')
                 existing.wind_speed = item.get('wind', {}).get('speed')
                 existing.wind_deg = item.get('wind', {}).get('deg')
                 existing.wind_gust = item.get('wind', {}).get('gust')
@@ -165,8 +216,6 @@ def sync_weather_forecast():
                 existing.pop = item.get('pop', 0)
                 existing.rain_1h = item.get('rain', {}).get('1h') if item.get('rain') else None
                 existing.rain_3h = item.get('rain', {}).get('3h') if item.get('rain') else None
-                existing.snow_1h = item.get('snow', {}).get('1h') if item.get('snow') else None
-                existing.snow_3h = item.get('snow', {}).get('3h') if item.get('snow') else None
                 existing.raw_data = json.dumps(item)
                 
                 records_updated += 1
@@ -182,8 +231,6 @@ def sync_weather_forecast():
                     city_coord_lat=city_data.get('coord', {}).get('lat'),
                     city_coord_lon=city_data.get('coord', {}).get('lon'),
                     city_timezone=city_data.get('timezone'),
-                    city_sunrise=city_data.get('sunrise'),
-                    city_sunset=city_data.get('sunset'),
                     city_population=city_data.get('population'),
                     weather_main=weather_condition['main'],
                     weather_description=weather_condition['description'],
@@ -194,8 +241,6 @@ def sync_weather_forecast():
                     temp_max=item.get('main', {}).get('temp_max'),
                     pressure=item.get('main', {}).get('pressure'),
                     humidity=item.get('main', {}).get('humidity'),
-                    sea_level=item.get('main', {}).get('sea_level'),
-                    grnd_level=item.get('main', {}).get('grnd_level'),
                     wind_speed=item.get('wind', {}).get('speed'),
                     wind_deg=item.get('wind', {}).get('deg'),
                     wind_gust=item.get('wind', {}).get('gust'),
@@ -204,8 +249,6 @@ def sync_weather_forecast():
                     pop=item.get('pop', 0),
                     rain_1h=item.get('rain', {}).get('1h') if item.get('rain') else None,
                     rain_3h=item.get('rain', {}).get('3h') if item.get('rain') else None,
-                    snow_1h=item.get('snow', {}).get('1h') if item.get('snow') else None,
-                    snow_3h=item.get('snow', {}).get('3h') if item.get('snow') else None,
                     raw_data=json.dumps(item)
                 )
                 
@@ -255,15 +298,65 @@ def sync_all_weather_data():
         if current_data:
             weather_condition = extract_weather_data(current_data.get('weather', []))
             
-            # Delete old current weather records (we only need the latest)
-            location_id = current_data.get('id')
-            if location_id:
-                WeatherCurrent.query.filter_by(location_id=location_id).delete()
+            # Extract actual weather measurement time from API (dt field)
+            measured_at = current_data.get('dt')
+            if measured_at:
+                measured_at_ms = int(measured_at * 1000)  # Convert seconds to milliseconds
             else:
-                WeatherCurrent.query.delete()
+                measured_at_ms = int(datetime.utcnow().timestamp() * 1000)
             
-            weather_record = WeatherCurrent(
-                timestamp=timestamp,
+            location_id = current_data.get('id')
+            
+            # Check for duplicate: same location and same measurement time (within 1 hour window)
+            time_window_ms = 3600000  # 1 hour in milliseconds
+            existing_record = WeatherCurrent.query.filter_by(
+                location_id=location_id
+            ).filter(
+                db.func.abs(WeatherCurrent.measured_at - measured_at_ms) < time_window_ms
+            ).first()
+            
+            if existing_record:
+                # Update existing record instead of creating duplicate
+                existing_record.timestamp = timestamp
+                existing_record.synced_at = datetime.utcnow()
+                existing_record.measured_at = measured_at_ms
+                existing_record.coord_lon = current_data.get('coord', {}).get('lon', 0)
+                existing_record.coord_lat = current_data.get('coord', {}).get('lat', 0)
+                existing_record.location_name = current_data.get('name', '')
+                existing_record.timezone = current_data.get('timezone')
+                existing_record.weather_main = weather_condition['main']
+                existing_record.weather_description = weather_condition['description']
+                existing_record.weather_icon = weather_condition['icon']
+                existing_record.temp = current_data.get('main', {}).get('temp')
+                existing_record.feels_like = current_data.get('main', {}).get('feels_like')
+                existing_record.temp_min = current_data.get('main', {}).get('temp_min')
+                existing_record.temp_max = current_data.get('main', {}).get('temp_max')
+                existing_record.pressure = current_data.get('main', {}).get('pressure')
+                existing_record.humidity = current_data.get('main', {}).get('humidity')
+                existing_record.wind_speed = current_data.get('wind', {}).get('speed')
+                existing_record.wind_deg = current_data.get('wind', {}).get('deg')
+                existing_record.wind_gust = current_data.get('wind', {}).get('gust')
+                existing_record.visibility = current_data.get('visibility')
+                existing_record.clouds_all = current_data.get('clouds', {}).get('all')
+                existing_record.rain_1h = current_data.get('rain', {}).get('1h') if current_data.get('rain') else None
+                existing_record.rain_3h = current_data.get('rain', {}).get('3h') if current_data.get('rain') else None
+                existing_record.country = current_data.get('sys', {}).get('country', '')
+                existing_record.raw_data = json.dumps(current_data)
+                
+                results['current'] = {'id': existing_record.id, 'success': True, 'isUpdate': True}
+            else:
+                # Clean up old records (keep last 10 days for efficiency)
+                cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
+                if location_id:
+                    WeatherCurrent.query.filter_by(location_id=location_id).filter(
+                        WeatherCurrent.timestamp < cutoff_time
+                    ).delete()
+                else:
+                    WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete()
+                
+                weather_record = WeatherCurrent(
+                    timestamp=timestamp,  # Sync timestamp
+                    measured_at=measured_at_ms,  # Actual weather measurement time
                 coord_lon=current_data.get('coord', {}).get('lon', 0),
                 coord_lat=current_data.get('coord', {}).get('lat', 0),
                 location_name=current_data.get('name', ''),
@@ -278,8 +371,6 @@ def sync_all_weather_data():
                 temp_max=current_data.get('main', {}).get('temp_max'),
                 pressure=current_data.get('main', {}).get('pressure'),
                 humidity=current_data.get('main', {}).get('humidity'),
-                sea_level=current_data.get('main', {}).get('sea_level'),
-                grnd_level=current_data.get('main', {}).get('grnd_level'),
                 wind_speed=current_data.get('wind', {}).get('speed'),
                 wind_deg=current_data.get('wind', {}).get('deg'),
                 wind_gust=current_data.get('wind', {}).get('gust'),
@@ -287,11 +378,7 @@ def sync_all_weather_data():
                 clouds_all=current_data.get('clouds', {}).get('all'),
                 rain_1h=current_data.get('rain', {}).get('1h') if current_data.get('rain') else None,
                 rain_3h=current_data.get('rain', {}).get('3h') if current_data.get('rain') else None,
-                snow_1h=current_data.get('snow', {}).get('1h') if current_data.get('snow') else None,
-                snow_3h=current_data.get('snow', {}).get('3h') if current_data.get('snow') else None,
                 country=current_data.get('sys', {}).get('country', ''),
-                sunrise=current_data.get('sys', {}).get('sunrise'),
-                sunset=current_data.get('sys', {}).get('sunset'),
                 raw_data=json.dumps(current_data)
             )
             
@@ -328,8 +415,6 @@ def sync_all_weather_data():
                     existing.city_coord_lat = city_data.get('coord', {}).get('lat')
                     existing.city_coord_lon = city_data.get('coord', {}).get('lon')
                     existing.city_timezone = city_data.get('timezone')
-                    existing.city_sunrise = city_data.get('sunrise')
-                    existing.city_sunset = city_data.get('sunset')
                     existing.city_population = city_data.get('population')
                     existing.weather_main = weather_condition['main']
                     existing.weather_description = weather_condition['description']
@@ -340,8 +425,6 @@ def sync_all_weather_data():
                     existing.temp_max = item.get('main', {}).get('temp_max')
                     existing.pressure = item.get('main', {}).get('pressure')
                     existing.humidity = item.get('main', {}).get('humidity')
-                    existing.sea_level = item.get('main', {}).get('sea_level')
-                    existing.grnd_level = item.get('main', {}).get('grnd_level')
                     existing.wind_speed = item.get('wind', {}).get('speed')
                     existing.wind_deg = item.get('wind', {}).get('deg')
                     existing.wind_gust = item.get('wind', {}).get('gust')
@@ -350,8 +433,6 @@ def sync_all_weather_data():
                     existing.pop = item.get('pop', 0)
                     existing.rain_1h = item.get('rain', {}).get('1h') if item.get('rain') else None
                     existing.rain_3h = item.get('rain', {}).get('3h') if item.get('rain') else None
-                    existing.snow_1h = item.get('snow', {}).get('1h') if item.get('snow') else None
-                    existing.snow_3h = item.get('snow', {}).get('3h') if item.get('snow') else None
                     existing.raw_data = json.dumps(item)
                     
                     forecast_updated += 1
@@ -367,8 +448,6 @@ def sync_all_weather_data():
                         city_coord_lat=city_data.get('coord', {}).get('lat'),
                         city_coord_lon=city_data.get('coord', {}).get('lon'),
                         city_timezone=city_data.get('timezone'),
-                        city_sunrise=city_data.get('sunrise'),
-                        city_sunset=city_data.get('sunset'),
                         city_population=city_data.get('population'),
                         weather_main=weather_condition['main'],
                         weather_description=weather_condition['description'],
@@ -379,8 +458,6 @@ def sync_all_weather_data():
                         temp_max=item.get('main', {}).get('temp_max'),
                         pressure=item.get('main', {}).get('pressure'),
                         humidity=item.get('main', {}).get('humidity'),
-                        sea_level=item.get('main', {}).get('sea_level'),
-                        grnd_level=item.get('main', {}).get('grnd_level'),
                         wind_speed=item.get('wind', {}).get('speed'),
                         wind_deg=item.get('wind', {}).get('deg'),
                         wind_gust=item.get('wind', {}).get('gust'),
@@ -389,8 +466,6 @@ def sync_all_weather_data():
                         pop=item.get('pop', 0),
                         rain_1h=item.get('rain', {}).get('1h') if item.get('rain') else None,
                         rain_3h=item.get('rain', {}).get('3h') if item.get('rain') else None,
-                        snow_1h=item.get('snow', {}).get('1h') if item.get('snow') else None,
-                        snow_3h=item.get('snow', {}).get('3h') if item.get('snow') else None,
                         raw_data=json.dumps(item)
                     )
                     
@@ -553,7 +628,7 @@ def check_data_staleness():
 def predict_with_ml():
     """
     Generate weather predictions using ML model when API is unavailable.
-    Uses last 48 hours of data from database to predict next 24 hours.
+    Uses last 48 hours of weather_current data to predict next 24 hours.
     """
     try:
         predictor = get_predictor()
@@ -563,86 +638,59 @@ def predict_with_ml():
                 'message': 'ML predictor not available. Check model files and dependencies.'
             }), 503
         
-        # Get historical data from database (last 48+ hours)
-        # We need forecast data ordered by forecast_dt
-        historical_forecasts = WeatherForecast.query.order_by(
-            WeatherForecast.forecast_dt.asc()
-        ).limit(50).all()
+        # Get historical weather data from weather_current table (last 48+ hours)
+        cutoff_timestamp = int((datetime.utcnow() - timedelta(hours=48)).timestamp() * 1000)
+        historical_current = WeatherCurrent.query.filter(
+            WeatherCurrent.timestamp >= cutoff_timestamp
+        ).order_by(WeatherCurrent.timestamp.asc()).all()
         
-        # Also get current weather as the most recent point
-        latest_current = WeatherCurrent.query.order_by(WeatherCurrent.timestamp.desc()).first()
-        
-        if not historical_forecasts and not latest_current:
+        if not historical_current or len(historical_current) < 16:  # Need at least 16 records (48 hours / 3 hours)
             return jsonify({
                 'success': False,
-                'message': 'No historical data available. Need at least 48 hours of data for prediction.'
+                'message': f'Insufficient historical data. Need at least 48 hours of actual weather data, got {len(historical_current)} records. '
+                          f'Make sure weather_current data is being saved every 3 hours.'
             }), 400
         
-        # Build historical data list
+        # Build historical data list from weather records
+        # Use measured_at (actual weather time) for prediction input
         historical_data = []
-        
-        # Add forecast data
-        for forecast in historical_forecasts:
+        for current in historical_current:
             historical_data.append({
-                'timestamp': forecast.timestamp,
-                'temp': forecast.temp,
-                'feels_like': forecast.feels_like,
-                'temp_min': forecast.temp_min,
-                'temp_max': forecast.temp_max,
-                'pressure': forecast.pressure,
-                'humidity': forecast.humidity,
-                'wind_speed': forecast.wind_speed,
-                'wind_deg': forecast.wind_deg,
-                'rain_1h': forecast.rain_1h or 0.0,
-                'rain_3h': forecast.rain_3h or 0.0,
-                'clouds_all': forecast.clouds_all or 0,
+                'timestamp': current.measured_at or current.timestamp,  # Prefer measured_at, fallback to timestamp
+                'temp': current.temp,
+                'feels_like': current.feels_like,
+                'temp_min': current.temp_min,
+                'temp_max': current.temp_max,
+                'pressure': current.pressure,
+                'humidity': current.humidity,
+                'wind_speed': current.wind_speed,
+                'wind_deg': current.wind_deg,
+                'rain_1h': current.rain_1h or 0.0,
+                'rain_3h': current.rain_3h or 0.0,
+                'clouds_all': current.clouds_all or 0,
             })
         
-        # Add current weather as the latest point if available
-        if latest_current:
-            historical_data.append({
-                'timestamp': latest_current.timestamp,
-                'temp': latest_current.temp,
-                'feels_like': latest_current.feels_like,
-                'temp_min': latest_current.temp_min,
-                'temp_max': latest_current.temp_max,
-                'pressure': latest_current.pressure,
-                'humidity': latest_current.humidity,
-                'wind_speed': latest_current.wind_speed,
-                'wind_deg': latest_current.wind_deg,
-                'rain_1h': latest_current.rain_1h or 0.0,
-                'rain_3h': latest_current.rain_3h or 0.0,
-                'clouds_all': latest_current.clouds_all or 0,
-            })
+        # Take last 48 hours (or available data)
+        if len(historical_data) > predictor.lookback_hours:
+            historical_data = historical_data[-predictor.lookback_hours:]
         
-        if len(historical_data) < 48:
+        if len(historical_data) < predictor.lookback_hours:
             return jsonify({
                 'success': False,
-                'message': f'Insufficient historical data. Need at least 48 hours, got {len(historical_data)} records.'
+                'message': f'Insufficient historical data. Need at least {predictor.lookback_hours} hours, got {len(historical_data)} records.'
             }), 400
         
         # Generate predictions
         predicted_records = predictor.predict(historical_data)
         
-        # Get city info from latest forecast or current weather
-        city_id = None
-        city_name = None
-        city_country = None
-        city_coord_lat = None
-        city_coord_lon = None
-        
-        if historical_forecasts:
-            latest_forecast = historical_forecasts[-1]
-            city_id = latest_forecast.city_id
-            city_name = latest_forecast.city_name
-            city_country = latest_forecast.city_country
-            city_coord_lat = latest_forecast.city_coord_lat
-            city_coord_lon = latest_forecast.city_coord_lon
-        elif latest_current:
-            city_id = latest_current.location_id
-            city_name = latest_current.location_name
-            city_coord_lat = latest_current.coord_lat
-            city_coord_lon = latest_current.coord_lon
+        # Get city info from latest current weather record
+        latest_current = historical_current[-1]
+        city_id = latest_current.location_id
+        city_name = latest_current.location_name
+        city_coord_lat = latest_current.coord_lat
+        city_coord_lon = latest_current.coord_lon
+        # Try to get country from latest record or use empty string
+        city_country = latest_current.country or ''
         
         # Store predictions in database
         timestamp = int(datetime.utcnow().timestamp() * 1000)
@@ -780,83 +828,60 @@ def auto_predict_if_stale():
                 'message': 'ML predictor not available'
             }), 503
         
-        # Get historical data
-        historical_forecasts = WeatherForecast.query.order_by(
-            WeatherForecast.forecast_dt.asc()
-        ).limit(50).all()
+        # Get historical weather data from weather_current table (last 48+ hours)
+        # Use measured_at (actual weather time) instead of timestamp (sync time)
+        cutoff_timestamp = int((datetime.utcnow() - timedelta(hours=48)).timestamp() * 1000)
+        historical_current = WeatherCurrent.query.filter(
+            WeatherCurrent.measured_at >= cutoff_timestamp
+        ).order_by(WeatherCurrent.measured_at.asc()).all()
         
-        latest_current = WeatherCurrent.query.order_by(WeatherCurrent.timestamp.desc()).first()
-        
-        if not historical_forecasts and not latest_current:
+        if not historical_current or len(historical_current) < 16:
             return jsonify({
                 'success': False,
                 'action': 'failed',
-                'message': 'No historical data available for prediction'
+                'message': f'Insufficient historical data. Need at least 48 hours of actual weather data, got {len(historical_current)} records.'
             }), 400
         
-        # Build historical data
+        # Build historical data list from actual weather records
+        # Use measured_at (actual weather time) for prediction input
         historical_data = []
-        for forecast in historical_forecasts:
+        for current in historical_current:
             historical_data.append({
-                'timestamp': forecast.timestamp,
-                'temp': forecast.temp,
-                'feels_like': forecast.feels_like,
-                'temp_min': forecast.temp_min,
-                'temp_max': forecast.temp_max,
-                'pressure': forecast.pressure,
-                'humidity': forecast.humidity,
-                'wind_speed': forecast.wind_speed,
-                'wind_deg': forecast.wind_deg,
-                'rain_1h': forecast.rain_1h or 0.0,
-                'rain_3h': forecast.rain_3h or 0.0,
-                'clouds_all': forecast.clouds_all or 0,
+                'timestamp': current.measured_at or current.timestamp,  # Prefer measured_at, fallback to timestamp
+                'temp': current.temp,
+                'feels_like': current.feels_like,
+                'temp_min': current.temp_min,
+                'temp_max': current.temp_max,
+                'pressure': current.pressure,
+                'humidity': current.humidity,
+                'wind_speed': current.wind_speed,
+                'wind_deg': current.wind_deg,
+                'rain_1h': current.rain_1h or 0.0,
+                'rain_3h': current.rain_3h or 0.0,
+                'clouds_all': current.clouds_all or 0,
             })
         
-        if latest_current:
-            historical_data.append({
-                'timestamp': latest_current.timestamp,
-                'temp': latest_current.temp,
-                'feels_like': latest_current.feels_like,
-                'temp_min': latest_current.temp_min,
-                'temp_max': latest_current.temp_max,
-                'pressure': latest_current.pressure,
-                'humidity': latest_current.humidity,
-                'wind_speed': latest_current.wind_speed,
-                'wind_deg': latest_current.wind_deg,
-                'rain_1h': latest_current.rain_1h or 0.0,
-                'rain_3h': latest_current.rain_3h or 0.0,
-                'clouds_all': latest_current.clouds_all or 0,
-            })
+        # Take last 48 hours (or available data)
+        if len(historical_data) > predictor.lookback_hours:
+            historical_data = historical_data[-predictor.lookback_hours:]
         
-        if len(historical_data) < 48:
+        if len(historical_data) < predictor.lookback_hours:
             return jsonify({
                 'success': False,
                 'action': 'failed',
-                'message': f'Insufficient data: need 48 hours, got {len(historical_data)} records'
+                'message': f'Insufficient data: need {predictor.lookback_hours} hours, got {len(historical_data)} records'
             }), 400
         
         # Generate and store predictions
         predicted_records = predictor.predict(historical_data)
         
-        # Get city info
-        city_id = None
-        city_name = None
-        city_country = None
-        city_coord_lat = None
-        city_coord_lon = None
-        
-        if historical_forecasts:
-            latest_forecast = historical_forecasts[-1]
-            city_id = latest_forecast.city_id
-            city_name = latest_forecast.city_name
-            city_country = latest_forecast.city_country
-            city_coord_lat = latest_forecast.city_coord_lat
-            city_coord_lon = latest_forecast.city_coord_lon
-        elif latest_current:
-            city_id = latest_current.location_id
-            city_name = latest_current.location_name
-            city_coord_lat = latest_current.coord_lat
-            city_coord_lon = latest_current.coord_lon
+        # Get city info from latest current weather record
+        latest_current = historical_current[-1]
+        city_id = latest_current.location_id
+        city_name = latest_current.location_name
+        city_country = latest_current.country or ''
+        city_coord_lat = latest_current.coord_lat
+        city_coord_lon = latest_current.coord_lon
         
         timestamp = int(datetime.utcnow().timestamp() * 1000)
         records_created = 0
