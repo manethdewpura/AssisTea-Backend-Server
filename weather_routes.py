@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
-from database import db, WeatherCurrent, WeatherForecast
+from database import db, WeatherCurrent, WeatherForecast, build_historical_data_for_prediction
 from ml_predictor import get_predictor, is_ml_available
 from sqlalchemy.exc import IntegrityError
 import json
@@ -775,59 +775,51 @@ def predict_with_ml():
                 'message': 'ML predictor not available. Check model files and dependencies.'
             }), 503
         
-        # Get historical weather data from weather_current table (last 48+ hours)
-        cutoff_timestamp = int((datetime.utcnow() - timedelta(hours=48)).timestamp() * 1000)
-        historical_current = WeatherCurrent.query.filter(
-            WeatherCurrent.timestamp >= cutoff_timestamp
-        ).order_by(WeatherCurrent.timestamp.asc()).all()
+        # Get city_id from latest current weather (if available) for filtering
+        latest_current = WeatherCurrent.query.order_by(WeatherCurrent.timestamp.desc()).first()
+        city_id = latest_current.location_id if latest_current else None
         
-        if not historical_current or len(historical_current) < 16:  # Need at least 16 records (48 hours / 3 hours)
+        # Build historical data using hybrid approach (current + forecast)
+        historical_data, city_info, data_source_info = build_historical_data_for_prediction(
+            lookback_hours=predictor.lookback_hours,
+            city_id=city_id
+        )
+        
+        if not data_source_info['has_sufficient_data']:
             return jsonify({
                 'success': False,
-                'message': f'Insufficient historical data. Need at least 48 hours of actual weather data, got {len(historical_current)} records. '
-                          f'Make sure weather_current data is being saved every 3 hours.'
+                'message': f'Insufficient historical data. Need at least 48 hours ({predictor.lookback_hours} hours), '
+                          f'got {len(historical_data)} records. '
+                          f'Sources: {data_source_info["current_count"]} from current, '
+                          f'{data_source_info["forecast_count"]} from forecast. '
+                          f'This hybrid approach uses both weather_current and weather_forecast tables to handle extended connection loss.'
             }), 400
         
-        # Build historical data list from weather records
-        # Use measured_at (actual weather time) for prediction input
-        historical_data = []
-        for current in historical_current:
-            historical_data.append({
-                'timestamp': current.measured_at or current.timestamp,  # Prefer measured_at, fallback to timestamp
-                'temp': current.temp,
-                'feels_like': current.feels_like,
-                'temp_min': current.temp_min,
-                'temp_max': current.temp_max,
-                'pressure': current.pressure,
-                'humidity': current.humidity,
-                'wind_speed': current.wind_speed,
-                'wind_deg': current.wind_deg,
-                'rain_1h': current.rain_1h or 0.0,
-                'rain_3h': current.rain_3h or 0.0,
-                'clouds_all': current.clouds_all or 0,
-            })
-        
-        # Take last 48 hours (or available data)
+        # Ensure we have exactly the right amount of data
         if len(historical_data) > predictor.lookback_hours:
             historical_data = historical_data[-predictor.lookback_hours:]
-        
-        if len(historical_data) < predictor.lookback_hours:
-            return jsonify({
-                'success': False,
-                'message': f'Insufficient historical data. Need at least {predictor.lookback_hours} hours, got {len(historical_data)} records.'
-            }), 400
         
         # Generate predictions
         predicted_records = predictor.predict(historical_data)
         
-        # Get city info from latest current weather record
-        latest_current = historical_current[-1]
-        city_id = latest_current.location_id
-        city_name = latest_current.location_name
-        city_coord_lat = latest_current.coord_lat
-        city_coord_lon = latest_current.coord_lon
-        # Try to get country from latest record or use empty string
-        city_country = latest_current.country or ''
+        # Get city info from helper function result or fallback to latest current
+        if city_info:
+            city_id = city_info['id']
+            city_name = city_info['name']
+            city_country = city_info['country']
+            city_coord_lat = city_info['coord_lat']
+            city_coord_lon = city_info['coord_lon']
+        elif latest_current:
+            city_id = latest_current.location_id
+            city_name = latest_current.location_name
+            city_country = latest_current.country or ''
+            city_coord_lat = latest_current.coord_lat
+            city_coord_lon = latest_current.coord_lon
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No city information available for predictions'
+            }), 400
         
         # Store predictions in database
         timestamp = int(datetime.utcnow().timestamp() * 1000)
@@ -902,7 +894,11 @@ def predict_with_ml():
         
         db.session.commit()
         
-        logger.info(f"✓ ML predictions generated and stored: {len(predicted_records)} records, {records_created} new")
+        logger.info(
+            f"✓ ML predictions generated and stored: {len(predicted_records)} records, {records_created} new. "
+            f"Data sources: {data_source_info['current_count']} from current, "
+            f"{data_source_info['forecast_count']} from forecast"
+        )
         
         return jsonify({
             'success': True,
@@ -910,7 +906,12 @@ def predict_with_ml():
             'predictions_count': len(predicted_records),
             'records_created': records_created,
             'timestamp': timestamp,
-            'prediction_intervals': predictor.prediction_intervals
+            'prediction_intervals': predictor.prediction_intervals,
+            'data_sources': {
+                'current_count': data_source_info['current_count'],
+                'forecast_count': data_source_info['forecast_count'],
+                'total_records': len(historical_data)
+            }
         }), 200
         
     except ValueError as e:
@@ -965,60 +966,52 @@ def auto_predict_if_stale():
                 'message': 'ML predictor not available'
             }), 503
         
-        # Get historical weather data from weather_current table (last 48+ hours)
-        # Use measured_at (actual weather time) instead of timestamp (sync time)
-        cutoff_timestamp = int((datetime.utcnow() - timedelta(hours=48)).timestamp() * 1000)
-        historical_current = WeatherCurrent.query.filter(
-            WeatherCurrent.measured_at >= cutoff_timestamp
-        ).order_by(WeatherCurrent.measured_at.asc()).all()
+        # Get city_id from latest current weather (if available) for filtering
+        latest_current = WeatherCurrent.query.order_by(WeatherCurrent.timestamp.desc()).first()
+        city_id = latest_current.location_id if latest_current else None
         
-        if not historical_current or len(historical_current) < 16:
+        # Build historical data using hybrid approach (current + forecast)
+        historical_data, city_info, data_source_info = build_historical_data_for_prediction(
+            lookback_hours=predictor.lookback_hours,
+            city_id=city_id
+        )
+        
+        if not data_source_info['has_sufficient_data']:
             return jsonify({
                 'success': False,
                 'action': 'failed',
-                'message': f'Insufficient historical data. Need at least 48 hours of actual weather data, got {len(historical_current)} records.'
+                'message': f'Insufficient historical data. Need at least 48 hours ({predictor.lookback_hours} hours), '
+                          f'got {len(historical_data)} records. '
+                          f'Sources: {data_source_info["current_count"]} from current, '
+                          f'{data_source_info["forecast_count"]} from forecast.'
             }), 400
         
-        # Build historical data list from actual weather records
-        # Use measured_at (actual weather time) for prediction input
-        historical_data = []
-        for current in historical_current:
-            historical_data.append({
-                'timestamp': current.measured_at or current.timestamp,  # Prefer measured_at, fallback to timestamp
-                'temp': current.temp,
-                'feels_like': current.feels_like,
-                'temp_min': current.temp_min,
-                'temp_max': current.temp_max,
-                'pressure': current.pressure,
-                'humidity': current.humidity,
-                'wind_speed': current.wind_speed,
-                'wind_deg': current.wind_deg,
-                'rain_1h': current.rain_1h or 0.0,
-                'rain_3h': current.rain_3h or 0.0,
-                'clouds_all': current.clouds_all or 0,
-            })
-        
-        # Take last 48 hours (or available data)
+        # Ensure we have exactly the right amount of data
         if len(historical_data) > predictor.lookback_hours:
             historical_data = historical_data[-predictor.lookback_hours:]
-        
-        if len(historical_data) < predictor.lookback_hours:
-            return jsonify({
-                'success': False,
-                'action': 'failed',
-                'message': f'Insufficient data: need {predictor.lookback_hours} hours, got {len(historical_data)} records'
-            }), 400
         
         # Generate and store predictions
         predicted_records = predictor.predict(historical_data)
         
-        # Get city info from latest current weather record
-        latest_current = historical_current[-1]
-        city_id = latest_current.location_id
-        city_name = latest_current.location_name
-        city_country = latest_current.country or ''
-        city_coord_lat = latest_current.coord_lat
-        city_coord_lon = latest_current.coord_lon
+        # Get city info from helper function result or fallback to latest current
+        if city_info:
+            city_id = city_info['id']
+            city_name = city_info['name']
+            city_country = city_info['country']
+            city_coord_lat = city_info['coord_lat']
+            city_coord_lon = city_info['coord_lon']
+        elif latest_current:
+            city_id = latest_current.location_id
+            city_name = latest_current.location_name
+            city_country = latest_current.country or ''
+            city_coord_lat = latest_current.coord_lat
+            city_coord_lon = latest_current.coord_lon
+        else:
+            return jsonify({
+                'success': False,
+                'action': 'failed',
+                'message': 'No city information available for predictions'
+            }), 400
         
         timestamp = int(datetime.utcnow().timestamp() * 1000)
         records_created = 0
@@ -1088,7 +1081,11 @@ def auto_predict_if_stale():
         
         db.session.commit()
         
-        logger.info(f"✓ Auto-prediction: Generated {len(predicted_records)} ML predictions")
+        logger.info(
+            f"✓ Auto-prediction: Generated {len(predicted_records)} ML predictions. "
+            f"Data sources: {data_source_info['current_count']} from current, "
+            f"{data_source_info['forecast_count']} from forecast"
+        )
         
         return jsonify({
             'success': True,
@@ -1096,7 +1093,12 @@ def auto_predict_if_stale():
             'message': f'Generated {len(predicted_records)} ML predictions',
             'predictions_count': len(predicted_records),
             'records_created': records_created,
-            'timestamp': timestamp
+            'timestamp': timestamp,
+            'data_sources': {
+                'current_count': data_source_info['current_count'],
+                'forecast_count': data_source_info['forecast_count'],
+                'total_records': len(historical_data)
+            }
         }), 200
         
     except Exception as e:
