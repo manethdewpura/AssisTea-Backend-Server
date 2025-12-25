@@ -231,16 +231,21 @@ class WeatherMLPredictor:
         Args:
             historical_data: List of weather records (dicts) from database, 
                            ordered by timestamp (oldest first).
-                           Should contain at least 48 hours of data.
+                           Should contain at least 48 timesteps (records at 3-hour intervals).
+                           For 48-hour lookback with 3-hour intervals: minimum 16 records.
         
         Returns:
             List of predicted weather records, one for each prediction interval
         """
-        if len(historical_data) < self.lookback_hours:
-            raise ValueError(f"Need at least {self.lookback_hours} hours of historical data, "
+        # Calculate minimum records needed (48 hours / 3-hour intervals = 16 records minimum)
+        min_records = max(16, self.lookback_hours // 3)
+        
+        if len(historical_data) < min_records:
+            raise ValueError(f"Need at least {min_records} records ({self.lookback_hours} hours at 3-hour intervals), "
                            f"got {len(historical_data)} records")
         
-        # Take last 48 hours
+        # Take last N records to match model's lookback_hours
+        # Model expects 'lookback_hours' number of timesteps
         lookback_data = historical_data[-self.lookback_hours:]
         
         # Prepare feature matrix
@@ -255,7 +260,16 @@ class WeatherMLPredictor:
         # Normalize (returns float32)
         X_normalized = self._normalize_features(X)
         
-        # Reshape for model input: (1, lookback_hours, num_features)
+        # Reshape for model input: (1, num_timesteps, num_features)
+        # If we have fewer records than lookback_hours, pad with zeros or repeat last
+        num_timesteps = len(lookback_data)
+        if num_timesteps < self.lookback_hours:
+            # Pad with the last record repeated
+            padding_needed = self.lookback_hours - num_timesteps
+            last_record = X_normalized[-1:]
+            padding = np.repeat(last_record, padding_needed, axis=0)
+            X_normalized = np.vstack([X_normalized, padding])
+        
         X_input = X_normalized.reshape(1, self.lookback_hours, len(self.feature_names))
         
         # Run inference
