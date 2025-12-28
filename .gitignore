@@ -5,5 +5,4 @@ __pycache__/
 .vscode
 
 # Database files
-assistea.db
 *.db
