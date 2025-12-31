@@ -45,12 +45,12 @@ class MLBackgroundTask:
                     self._generate_predictions()
                     return
                 
-                # Check if data is stale (older than 3 hours)
+                # Check if data is stale 
                 current_time = datetime.utcnow()
                 data_time = datetime.fromtimestamp(latest_current.timestamp / 1000)
                 age_hours = (current_time - data_time).total_seconds() / 3600
                 
-                if age_hours > 3:
+                if age_hours > 12:
                     logger.info(f"Weather data is stale ({age_hours:.2f} hours old), generating ML predictions...")
                     self._generate_predictions()
                 else:
@@ -79,7 +79,7 @@ class MLBackgroundTask:
             
             if not data_source_info['has_sufficient_data']:
                 logger.warning(
-                    f"Insufficient historical data: need at least 48 hours ({predictor.lookback_hours} hours), "
+                    f"Insufficient historical data: need at least ({predictor.lookback_hours} hours), "
                     f"got {len(historical_data)} records. "
                     f"Sources: {data_source_info['current_count']} from current, "
                     f"{data_source_info['forecast_count']} from forecast"
@@ -131,7 +131,7 @@ class MLBackgroundTask:
             
             import json
             for pred_record in predicted_records:
-                # 1. Store in weather_forecast table (existing behavior)
+                # 1. Store in weather_forecast table
                 existing_forecast = WeatherForecast.query.filter_by(
                     city_id=city_id,
                     forecast_dt=pred_record['forecast_dt']
@@ -196,7 +196,7 @@ class MLBackgroundTask:
                     db.session.add(forecast_record)
                     forecast_records_created += 1
                 
-                # 2. Store in weather_current table (NEW - enables recursive prediction)
+                # 2. Store in weather_current table enables recursive prediction
                 # This allows future ML predictions to use previous ML predictions as input
                 existing_current = WeatherCurrent.query.filter_by(
                     location_id=city_id,

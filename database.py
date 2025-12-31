@@ -357,7 +357,7 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
         historical_data.extend(forecast_data_list)
         data_source_info['forecast_count'] = len(forecast_data_list)
     
-    # Step 3: Tier 3 - Use ML-generated predictions from weather_current (Recursive Prediction)
+    # Step 3: Use ML-generated predictions from weather_current (Recursive Prediction)
     # This enables self-sustaining predictions during extreme connection loss
     if len(historical_data) < lookback_hours:
         needed_records = lookback_hours - len(historical_data)
@@ -411,18 +411,18 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
         source_priority = {'current': 3, 'forecast_past': 2, 'forecast_recent': 1, 'ml_prediction': 0}
         
         for record in historical_data:
-            # Round to nearest 3-hour interval to handle slight timestamp differences
-            rounded_timestamp = (record['timestamp'] // (3 * 3600 * 1000)) * (3 * 3600 * 1000)
-            if rounded_timestamp not in seen_timestamps:
-                seen_timestamps[rounded_timestamp] = record
+            # Use exact timestamp - only deduplicate if timestamps are exactly the same
+            timestamp = record['timestamp']
+            if timestamp not in seen_timestamps:
+                seen_timestamps[timestamp] = record
                 deduplicated_data.append(record)
             else:
                 # Replace with higher priority source if available
                 current_priority = source_priority.get(record['source'], 0)
-                existing_priority = source_priority.get(seen_timestamps[rounded_timestamp]['source'], 0)
+                existing_priority = source_priority.get(seen_timestamps[timestamp]['source'], 0)
                 if current_priority > existing_priority:
-                    deduplicated_data.remove(seen_timestamps[rounded_timestamp])
-                    seen_timestamps[rounded_timestamp] = record
+                    deduplicated_data.remove(seen_timestamps[timestamp])
+                    seen_timestamps[timestamp] = record
                     deduplicated_data.append(record)
         
         historical_data = sorted(deduplicated_data, key=lambda x: x['timestamp'])
@@ -437,22 +437,22 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
         seen_timestamps = {}
         deduplicated_data = []
         for record in historical_data:
-            # Round to nearest 3-hour interval to handle slight timestamp differences
-            rounded_timestamp = (record['timestamp'] // (3 * 3600 * 1000)) * (3 * 3600 * 1000)
-            if rounded_timestamp not in seen_timestamps:
-                seen_timestamps[rounded_timestamp] = record
+            # Use exact timestamp - only deduplicate if timestamps are exactly the same
+            timestamp = record['timestamp']
+            if timestamp not in seen_timestamps:
+                seen_timestamps[timestamp] = record
                 deduplicated_data.append(record)
-            elif record['source'] == 'current' and seen_timestamps[rounded_timestamp]['source'] != 'current':
+            elif record['source'] == 'current' and seen_timestamps[timestamp]['source'] != 'current':
                 # Replace forecast with current if available
-                deduplicated_data.remove(seen_timestamps[rounded_timestamp])
-                seen_timestamps[rounded_timestamp] = record
+                deduplicated_data.remove(seen_timestamps[timestamp])
+                seen_timestamps[timestamp] = record
                 deduplicated_data.append(record)
         
         historical_data = sorted(deduplicated_data, key=lambda x: x['timestamp'])
     
     # Take last N hours worth of data (ensuring we have exactly what we need)
-    # Each record represents ~3 hours, so we need approximately lookback_hours/3 records
-    target_records = max(16, lookback_hours // 3)  # At least 16 records for 48 hours
+    # With hourly API calls, we need lookback_hours records (1 record per hour)
+    target_records = lookback_hours  # For 48 hours with hourly data = 48 records
     
     if len(historical_data) > target_records:
         historical_data = historical_data[-target_records:]
@@ -461,7 +461,7 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
     for record in historical_data:
         record.pop('source', None)
     
-    data_source_info['has_sufficient_data'] = len(historical_data) >= 16  # Minimum 16 records (48 hours)
+    data_source_info['has_sufficient_data'] = len(historical_data) >= lookback_hours  # Need full lookback period
     
     return historical_data, city_info, data_source_info
 

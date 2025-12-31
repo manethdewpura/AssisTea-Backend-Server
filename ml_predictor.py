@@ -123,13 +123,13 @@ class WeatherMLPredictor:
         
         # Season (meteorological)
         if month in [12, 1, 2]:
-            season = 0  # Winter
+            season = 0 
         elif month in [3, 4, 5]:
-            season = 1  # Spring
+            season = 1 
         elif month in [6, 7, 8]:
-            season = 2  # Summer
+            season = 2 
         else:
-            season = 3  # Fall
+            season = 3  
         
         # Calculate dew point (approximation if not available)
         temp = record.get('temp', 25.0)
@@ -231,17 +231,16 @@ class WeatherMLPredictor:
         Args:
             historical_data: List of weather records (dicts) from database, 
                            ordered by timestamp (oldest first).
-                           Should contain at least 48 timesteps (records at 3-hour intervals).
-                           For 48-hour lookback with 3-hour intervals: minimum 16 records.
+                           Should contain at least 48 timesteps.
         
         Returns:
             List of predicted weather records, one for each prediction interval
         """
-        # Calculate minimum records needed (48 hours / 3-hour intervals = 16 records minimum)
-        min_records = max(16, self.lookback_hours // 3)
+        # Calculate minimum records needed
+        min_records = max(1, self.lookback_hours)
         
         if len(historical_data) < min_records:
-            raise ValueError(f"Need at least {min_records} records ({self.lookback_hours} hours at 3-hour intervals), "
+            raise ValueError(f"Need at least {min_records} records ({self.lookback_hours} hours), "
                            f"got {len(historical_data)} records")
         
         # Take last N records to match model's lookback_hours

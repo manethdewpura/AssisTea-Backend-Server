@@ -58,10 +58,10 @@ def sync_current_weather():
             }), 400
         
         # Check for duplicate: same location, same measurement time (within 1 hour window),
-        # AND same sync timestamp (within 2 hours) - this prevents true duplicates while
-        # allowing queued data with same measured_at but different fetch times (3+ hours apart)
+        # AND same sync timestamp (within 30 minutes) - this prevents true duplicates while
+        # allowing queued data with same measured_at but different fetch times (1+ hours apart)
         measured_time_window_ms = 3600000  # 1 hour in milliseconds
-        sync_time_window_ms = 7200000  # 2 hours in milliseconds (less than 3-hour fetch interval)
+        sync_time_window_ms = 1800000  # 30 minutes in milliseconds (less than 1-hour fetch interval)
         query = WeatherCurrent.query
         if location_id is not None:
             query = query.filter_by(location_id=location_id)
@@ -385,10 +385,10 @@ def sync_all_weather_data():
                 results['current'] = {'success': False, 'error': 'Missing coordinates'}
             else:
                 # Check for duplicate: same location, same measurement time (within 1 hour window),
-                # AND same sync timestamp (within 2 hours) - this prevents true duplicates while
-                # allowing queued data with same measured_at but different fetch times (3+ hours apart)
+                # AND same sync timestamp (within 30 minutes) - this prevents true duplicates while
+                # allowing queued data with same measured_at but different fetch times (1+ hours apart)
                 measured_time_window_ms = 3600000  # 1 hour in milliseconds
-                sync_time_window_ms = 7200000  # 2 hours in milliseconds (less than 3-hour fetch interval)
+                sync_time_window_ms = 1800000  # 30 minutes in milliseconds (less than 1-hour fetch interval)
                 query = WeatherCurrent.query
                 if location_id is not None:
                     query = query.filter_by(location_id=location_id)
@@ -715,11 +715,12 @@ def get_latest_forecast():
             'message': f'Error retrieving forecast data: {str(e)}'
         }), 500
 
-
+# For manual testing of ML prediction staleness check and generation
+#check if data is stale and suggest ML prediction
 @weather_bp.route('/check-staleness', methods=['GET'])
 def check_data_staleness():
     """
-    Check if weather data is stale (older than 3 hours).
+    Check if weather data is stale (older than 12 hours).
     Returns staleness status and suggests ML prediction if needed.
     """
     try:
@@ -736,12 +737,12 @@ def check_data_staleness():
                 'suggestion': 'Use ML prediction to generate initial data'
             }), 200
         
-        # Check if data is stale (older than 3 hours)
+        # Check if data is stale
         current_time = datetime.utcnow()
         data_time = datetime.fromtimestamp(latest_current.timestamp / 1000)
         age_hours = (current_time - data_time).total_seconds() / 3600
         
-        is_stale = age_hours > 3
+        is_stale = age_hours > 12
         
         return jsonify({
             'success': True,
@@ -821,44 +822,53 @@ def predict_with_ml():
                 'message': 'No city information available for predictions'
             }), 400
         
-        # Store predictions in database
+        # Store predictions in both weather_forecast AND weather_current tables
         timestamp = int(datetime.utcnow().timestamp() * 1000)
-        records_created = 0
+        forecast_records_created = 0
+        current_records_created = 0
+        
+        # Calculate confidence score based on data sources used
+        # API data: 1.0, Real+Forecast: 0.75, With ML predictions: 0.55
+        base_confidence = 1.0
+        if data_source_info['forecast_count'] > 0:
+            base_confidence = 0.75
+        if data_source_info.get('ml_prediction_count', 0) > 0:
+            base_confidence = 0.55
         
         for pred_record in predicted_records:
-            # Check if prediction already exists
-            existing = WeatherForecast.query.filter_by(
+            # 1. Store in weather_forecast table
+            existing_forecast = WeatherForecast.query.filter_by(
                 city_id=city_id,
                 forecast_dt=pred_record['forecast_dt']
             ).first()
             
-            if existing:
-                # Update existing record
-                existing.timestamp = timestamp
-                existing.synced_at = datetime.utcnow()
-                existing.forecast_dt_txt = pred_record['forecast_dt_txt']
-                existing.temp = pred_record['temp']
-                existing.feels_like = pred_record['feels_like']
-                existing.temp_min = pred_record['temp_min']
-                existing.temp_max = pred_record['temp_max']
-                existing.pressure = pred_record['pressure']
-                existing.humidity = pred_record['humidity']
-                existing.wind_speed = pred_record['wind_speed']
-                existing.wind_deg = pred_record['wind_deg']
-                existing.rain_1h = pred_record.get('rain_1h', 0.0)
-                existing.rain_3h = pred_record.get('rain_3h', 0.0)
-                existing.clouds_all = pred_record.get('clouds_all', 0)
-                existing.weather_main = pred_record.get('weather_main', 'Clear')
-                existing.weather_description = pred_record.get('weather_description', 'clear sky')
-                existing.weather_icon = pred_record.get('weather_icon', '01d')
-                # Mark as ML prediction in raw_data
-                existing.raw_data = json.dumps({
+            if existing_forecast:
+                # Update existing forecast record
+                existing_forecast.timestamp = timestamp
+                existing_forecast.synced_at = datetime.utcnow()
+                existing_forecast.forecast_dt_txt = pred_record['forecast_dt_txt']
+                existing_forecast.temp = pred_record['temp']
+                existing_forecast.feels_like = pred_record['feels_like']
+                existing_forecast.temp_min = pred_record['temp_min']
+                existing_forecast.temp_max = pred_record['temp_max']
+                existing_forecast.pressure = pred_record['pressure']
+                existing_forecast.humidity = pred_record['humidity']
+                existing_forecast.wind_speed = pred_record['wind_speed']
+                existing_forecast.wind_deg = pred_record['wind_deg']
+                existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
+                existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
+                existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
+                existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
+                existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
+                existing_forecast.raw_data = json.dumps({
                     **pred_record,
                     'is_ml_prediction': True,
-                    'predicted_at': timestamp
+                    'predicted_at': timestamp,
+                    'confidence_score': base_confidence
                 })
             else:
-                # Create new record
+                # Create new forecast record
                 forecast_record = WeatherForecast(
                     timestamp=timestamp,
                     forecast_dt=pred_record['forecast_dt'],
@@ -882,29 +892,78 @@ def predict_with_ml():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
-                    pop=0.0,  # Probability of precipitation (not predicted)
+                    pop=0.0,
                     raw_data=json.dumps({
                         **pred_record,
                         'is_ml_prediction': True,
-                        'predicted_at': timestamp
+                        'predicted_at': timestamp,
+                        'confidence_score': base_confidence
                     })
                 )
                 db.session.add(forecast_record)
-                records_created += 1
+                forecast_records_created += 1
+            
+            # 2. Store in weather_current table (enables recursive prediction)
+            # This allows future ML predictions to use previous ML predictions as input
+            existing_current = WeatherCurrent.query.filter_by(
+                location_id=city_id,
+                measured_at=pred_record['timestamp']
+            ).first()
+            
+            if not existing_current:
+                current_record = WeatherCurrent(
+                    timestamp=timestamp,
+                    synced_at=datetime.utcnow(),
+                    measured_at=pred_record['timestamp'],
+                    coord_lon=city_coord_lon,
+                    coord_lat=city_coord_lat,
+                    location_name=city_name,
+                    location_id=city_id,
+                    country=city_country,
+                    weather_main=pred_record.get('weather_main', 'Clear'),
+                    weather_description=pred_record.get('weather_description', 'clear sky'),
+                    weather_icon=pred_record.get('weather_icon', '01d'),
+                    temp=pred_record['temp'],
+                    feels_like=pred_record['feels_like'],
+                    temp_min=pred_record['temp_min'],
+                    temp_max=pred_record['temp_max'],
+                    pressure=pred_record['pressure'],
+                    humidity=pred_record['humidity'],
+                    wind_speed=pred_record['wind_speed'],
+                    wind_deg=pred_record['wind_deg'],
+                    rain_1h=pred_record.get('rain_1h', 0.0),
+                    rain_3h=pred_record.get('rain_3h', 0.0),
+                    clouds_all=pred_record.get('clouds_all', 0),
+                    visibility=10000,  # Default visibility
+                    # ML tracking fields
+                    data_source='ml_prediction',
+                    is_ml_generated=True,
+                    confidence_score=base_confidence,
+                    raw_data=json.dumps({
+                        **pred_record,
+                        'is_ml_prediction': True,
+                        'predicted_at': timestamp,
+                        'confidence_score': base_confidence
+                    })
+                )
+                db.session.add(current_record)
+                current_records_created += 1
         
         db.session.commit()
         
         logger.info(
-            f"✓ ML predictions generated and stored: {len(predicted_records)} records, {records_created} new. "
-            f"Data sources: {data_source_info['current_count']} from current, "
-            f"{data_source_info['forecast_count']} from forecast"
+            f"✓ ML predictions generated: {len(predicted_records)} predictions (Confidence: {base_confidence:.2f}), "
+            f"created {forecast_records_created} forecast records, {current_records_created} current records for recursive prediction. "
+            f"Data sources: {data_source_info['current_count']} from current, {data_source_info['forecast_count']} from forecast"
         )
         
         return jsonify({
             'success': True,
             'message': f'Generated {len(predicted_records)} ML predictions',
             'predictions_count': len(predicted_records),
-            'records_created': records_created,
+            'forecast_records_created': forecast_records_created,
+            'current_records_created': current_records_created,
+            'confidence_score': base_confidence,
             'timestamp': timestamp,
             'prediction_intervals': predictor.prediction_intervals,
             'data_sources': {
@@ -943,12 +1002,12 @@ def auto_predict_if_stale():
             logger.info("No current weather data, attempting ML prediction...")
             # Will be handled by predict_with_ml logic
         else:
-            # Check if data is stale (older than 3 hours)
+            # Check if data is stale (older than 12 hours)
             current_time = datetime.utcnow()
             data_time = datetime.fromtimestamp(latest_current.timestamp / 1000)
             age_hours = (current_time - data_time).total_seconds() / 3600
             
-            if age_hours <= 3:
+            if age_hours <= 12:
                 return jsonify({
                     'success': True,
                     'action': 'skipped',
@@ -980,7 +1039,7 @@ def auto_predict_if_stale():
             return jsonify({
                 'success': False,
                 'action': 'failed',
-                'message': f'Insufficient historical data. Need at least 48 hours ({predictor.lookback_hours} hours), '
+                'message': f'Insufficient historical data. Need at least ({predictor.lookback_hours} hours), '
                           f'got {len(historical_data)} records. '
                           f'Sources: {data_source_info["current_count"]} from current, '
                           f'{data_source_info["forecast_count"]} from forecast.'
@@ -1014,38 +1073,51 @@ def auto_predict_if_stale():
             }), 400
         
         timestamp = int(datetime.utcnow().timestamp() * 1000)
-        records_created = 0
+        forecast_records_created = 0
+        current_records_created = 0
+        
+        # Calculate confidence score based on data sources used
+        # API data: 1.0, Real+Forecast: 0.75, With ML predictions: 0.55
+        base_confidence = 1.0
+        if data_source_info['forecast_count'] > 0:
+            base_confidence = 0.75
+        if data_source_info.get('ml_prediction_count', 0) > 0:
+            base_confidence = 0.55
         
         for pred_record in predicted_records:
-            existing = WeatherForecast.query.filter_by(
+            # 1. Store in weather_forecast table
+            existing_forecast = WeatherForecast.query.filter_by(
                 city_id=city_id,
                 forecast_dt=pred_record['forecast_dt']
             ).first()
             
-            if existing:
-                existing.timestamp = timestamp
-                existing.synced_at = datetime.utcnow()
-                existing.forecast_dt_txt = pred_record['forecast_dt_txt']
-                existing.temp = pred_record['temp']
-                existing.feels_like = pred_record['feels_like']
-                existing.temp_min = pred_record['temp_min']
-                existing.temp_max = pred_record['temp_max']
-                existing.pressure = pred_record['pressure']
-                existing.humidity = pred_record['humidity']
-                existing.wind_speed = pred_record['wind_speed']
-                existing.wind_deg = pred_record['wind_deg']
-                existing.rain_1h = pred_record.get('rain_1h', 0.0)
-                existing.rain_3h = pred_record.get('rain_3h', 0.0)
-                existing.clouds_all = pred_record.get('clouds_all', 0)
-                existing.weather_main = pred_record.get('weather_main', 'Clear')
-                existing.weather_description = pred_record.get('weather_description', 'clear sky')
-                existing.weather_icon = pred_record.get('weather_icon', '01d')
-                existing.raw_data = json.dumps({
+            if existing_forecast:
+                # Update existing forecast record
+                existing_forecast.timestamp = timestamp
+                existing_forecast.synced_at = datetime.utcnow()
+                existing_forecast.forecast_dt_txt = pred_record['forecast_dt_txt']
+                existing_forecast.temp = pred_record['temp']
+                existing_forecast.feels_like = pred_record['feels_like']
+                existing_forecast.temp_min = pred_record['temp_min']
+                existing_forecast.temp_max = pred_record['temp_max']
+                existing_forecast.pressure = pred_record['pressure']
+                existing_forecast.humidity = pred_record['humidity']
+                existing_forecast.wind_speed = pred_record['wind_speed']
+                existing_forecast.wind_deg = pred_record['wind_deg']
+                existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
+                existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
+                existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
+                existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
+                existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
+                existing_forecast.raw_data = json.dumps({
                     **pred_record,
                     'is_ml_prediction': True,
-                    'predicted_at': timestamp
+                    'predicted_at': timestamp,
+                    'confidence_score': base_confidence
                 })
             else:
+                # Create new forecast record
                 forecast_record = WeatherForecast(
                     timestamp=timestamp,
                     forecast_dt=pred_record['forecast_dt'],
@@ -1073,18 +1145,65 @@ def auto_predict_if_stale():
                     raw_data=json.dumps({
                         **pred_record,
                         'is_ml_prediction': True,
-                        'predicted_at': timestamp
+                        'predicted_at': timestamp,
+                        'confidence_score': base_confidence
                     })
                 )
                 db.session.add(forecast_record)
-                records_created += 1
+                forecast_records_created += 1
+            
+            # 2. Store in weather_current table (enables recursive prediction)
+            # This allows future ML predictions to use previous ML predictions as input
+            existing_current = WeatherCurrent.query.filter_by(
+                location_id=city_id,
+                measured_at=pred_record['timestamp']
+            ).first()
+            
+            if not existing_current:
+                current_record = WeatherCurrent(
+                    timestamp=timestamp,
+                    synced_at=datetime.utcnow(),
+                    measured_at=pred_record['timestamp'],
+                    coord_lon=city_coord_lon,
+                    coord_lat=city_coord_lat,
+                    location_name=city_name,
+                    location_id=city_id,
+                    country=city_country,
+                    weather_main=pred_record.get('weather_main', 'Clear'),
+                    weather_description=pred_record.get('weather_description', 'clear sky'),
+                    weather_icon=pred_record.get('weather_icon', '01d'),
+                    temp=pred_record['temp'],
+                    feels_like=pred_record['feels_like'],
+                    temp_min=pred_record['temp_min'],
+                    temp_max=pred_record['temp_max'],
+                    pressure=pred_record['pressure'],
+                    humidity=pred_record['humidity'],
+                    wind_speed=pred_record['wind_speed'],
+                    wind_deg=pred_record['wind_deg'],
+                    rain_1h=pred_record.get('rain_1h', 0.0),
+                    rain_3h=pred_record.get('rain_3h', 0.0),
+                    clouds_all=pred_record.get('clouds_all', 0),
+                    visibility=10000,  # Default visibility
+                    # ML tracking fields
+                    data_source='ml_prediction',
+                    is_ml_generated=True,
+                    confidence_score=base_confidence,
+                    raw_data=json.dumps({
+                        **pred_record,
+                        'is_ml_prediction': True,
+                        'predicted_at': timestamp,
+                        'confidence_score': base_confidence
+                    })
+                )
+                db.session.add(current_record)
+                current_records_created += 1
         
         db.session.commit()
         
         logger.info(
-            f"✓ Auto-prediction: Generated {len(predicted_records)} ML predictions. "
-            f"Data sources: {data_source_info['current_count']} from current, "
-            f"{data_source_info['forecast_count']} from forecast"
+            f"✓ Auto-prediction: Generated {len(predicted_records)} predictions (Confidence: {base_confidence:.2f}), "
+            f"created {forecast_records_created} forecast records, {current_records_created} current records for recursive prediction. "
+            f"Data sources: {data_source_info['current_count']} from current, {data_source_info['forecast_count']} from forecast"
         )
         
         return jsonify({
@@ -1092,7 +1211,9 @@ def auto_predict_if_stale():
             'action': 'predicted',
             'message': f'Generated {len(predicted_records)} ML predictions',
             'predictions_count': len(predicted_records),
-            'records_created': records_created,
+            'forecast_records_created': forecast_records_created,
+            'current_records_created': current_records_created,
+            'confidence_score': base_confidence,
             'timestamp': timestamp,
             'data_sources': {
                 'current_count': data_source_info['current_count'],
