@@ -5,6 +5,7 @@ from app.models.system_log import SystemLog
 from app.models.schedule import IrrigationSchedule, FertigationSchedule
 from app.models.zone import ZoneConfig
 from app.models.system_config import SystemConfig
+from app.models.weather_records import WeatherCurrent, WeatherForecast
 
 __all__ = [
     'SensorLog',
@@ -14,5 +15,7 @@ __all__ = [
     'FertigationSchedule',
     'ZoneConfig',
     'SystemConfig',
+    'WeatherCurrent',
+    'WeatherForecast'
 ]
 
