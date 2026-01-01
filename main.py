@@ -1,12 +1,10 @@
 """Main Flask application for irrigation and fertigation control system."""
 from flask import Flask, jsonify
 from flask_cors import CORS
-from database import db, init_db
-from weather_routes import weather_bp
-from ml_background_task import init_background_task
+from app.models.weather_records import db, init_db
+from app.ml.background_task import init_background_task
 import os
 import logging
-import os
 from datetime import datetime
 
 # Configure logging
@@ -21,8 +19,20 @@ app = Flask(__name__)
 # Enable CORS for all routes
 CORS(app)
 
+# Configure Flask-SQLAlchemy for weather database
+from app.config.config import WEATHER_DB_PATH, USE_MOCK_HARDWARE
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{WEATHER_DB_PATH}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize weather database with Flask app
+db.init_app(app)
+
+# Create weather database tables
+with app.app_context():
+    db.create_all()
+    logging.info("✓ Weather database initialized")
+
 # Import configuration
-from app.config.config import USE_MOCK_HARDWARE
 from app.config.database import init_db, get_db
 
 # Initialize database
