@@ -1,8 +1,16 @@
 """Main Flask application for irrigation and fertigation control system."""
 from flask import Flask, jsonify
 from flask_cors import CORS
-import os
+from app.models.weather_records import db, init_db
+from app.ml.background_task import init_background_task
+import logging
 from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -10,8 +18,20 @@ app = Flask(__name__)
 # Enable CORS for all routes
 CORS(app)
 
+# Configure Flask-SQLAlchemy for weather database
+from app.config.config import WEATHER_DB_PATH, USE_MOCK_HARDWARE
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{WEATHER_DB_PATH}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize weather database with Flask app
+db.init_app(app)
+
+# Create weather database tables
+with app.app_context():
+    db.create_all()
+    logging.info("✓ Weather database initialized")
+
 # Import configuration
-from app.config.config import USE_MOCK_HARDWARE
 from app.config.database import init_db, get_db
 
 # Initialize database
@@ -33,6 +53,14 @@ from app.config.config import (
     PUMP_GPIO_PIN, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
     DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
 )
+
+# Initialize ML background task (checks for stale data every 30 minutes)
+# This will automatically generate ML predictions when data is stale
+try:
+    init_background_task(app, check_interval_seconds=1800)  # 30 minutes
+    logging.info("✓ ML background task initialized")
+except Exception as e:
+    logging.warning(f"ML background task not available: {e}")
 
 # Initialize pump and valves
 # Note: Pressure reading is done via PressureSensor using ADS1115, not GPIO pin
