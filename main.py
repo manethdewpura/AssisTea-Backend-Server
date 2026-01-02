@@ -3,7 +3,6 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from app.models.weather_records import db, init_db
 from app.ml.background_task import init_background_task
-import os
 import logging
 from datetime import datetime
 

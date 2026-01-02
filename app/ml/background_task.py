@@ -7,7 +7,7 @@ Optimized for Raspberry Pi - runs efficiently in background.
 import time
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from threading import Thread
 from flask import Flask
 from app.models.weather_records import db, WeatherCurrent, WeatherForecast, build_historical_data_for_prediction

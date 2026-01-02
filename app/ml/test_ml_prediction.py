@@ -6,7 +6,6 @@ Test script for ML prediction system with new features:
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add project root to path so we can import from app module
@@ -17,7 +16,6 @@ sys.path.insert(0, str(project_root))
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
-from flask import Flask
 from app.models.weather_records import db, WeatherCurrent, WeatherForecast, build_historical_data_for_prediction
 from app.ml.predictor import get_predictor, is_ml_available
 from datetime import datetime, timedelta
