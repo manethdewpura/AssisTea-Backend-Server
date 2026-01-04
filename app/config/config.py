@@ -7,20 +7,34 @@ USE_MOCK_HARDWARE = not IS_RASPBERRY_PI or os.getenv('USE_MOCK_HARDWARE', 'false
 
 # GPIO Pin Configuration
 # Pump control
-PUMP_GPIO_PIN = int(os.getenv('PUMP_GPIO_PIN', '18'))
+IRRIGATION_PUMP_GPIO_PIN = int(os.getenv('IRRIGATION_PUMP_GPIO_PIN', '23'))  # Irrigation pump motor
+FERTILIZER_PUMP_GPIO_PIN = int(os.getenv('FERTILIZER_PUMP_GPIO_PIN', '22'))  # Fertilizer pump motor
+IRRIGATION_PUMP_SOLENOID_PIN = int(os.getenv('IRRIGATION_PUMP_SOLENOID_PIN', '24'))  # Irrigation pump solenoid valve
 
 # Fertilizer tank solenoids
-TANK_INLET_SOLENOID_PIN = int(os.getenv('TANK_INLET_SOLENOID_PIN', '23'))
-TANK_OUTLET_SOLENOID_PIN = int(os.getenv('TANK_OUTLET_SOLENOID_PIN', '24'))
+TANK_INLET_SOLENOID_PIN = int(os.getenv('TANK_INLET_SOLENOID_PIN', '25'))  # Tank inlet solenoid
+TANK_OUTLET_SOLENOID_PIN = int(os.getenv('TANK_OUTLET_SOLENOID_PIN', '26'))  # Tank outlet solenoid
+
+# Legacy support (for backward compatibility)
+PUMP_GPIO_PIN = IRRIGATION_PUMP_GPIO_PIN
 
 # ADS1115 ADC Configuration (for soil moisture and pressure sensors)
 ADS1115_I2C_ADDRESS = int(os.getenv('ADS1115_I2C_ADDRESS', '0x48'), 16)  # Default I2C address
-ADS1115_PRESSURE_CHANNEL = int(os.getenv('ADS1115_PRESSURE_CHANNEL', '0'))  # Channel 0 for pressure
-ADS1115_SOIL_MOISTURE_CHANNEL = int(os.getenv('ADS1115_SOIL_MOISTURE_CHANNEL', '1'))  # Channel 1 for soil moisture
+ADS1115_PRESSURE_CHANNEL = int(os.getenv('ADS1115_PRESSURE_CHANNEL', '2'))  # Channel 2 (A2) for irrigation pump pressure
+ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(os.getenv('ADS1115_FERTILIZER_PRESSURE_CHANNEL', '3'))  # Channel 3 (A3) for fertilizer pump pressure
 
 # Sensor pins (for digital sensors and tank level)
-DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '27'))
-DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '28'))
+DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '6'))  # Tank level sensor trigger
+DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo
+
+# Zone Configuration (hardcoded - single zone system)
+ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin for zone valve control
+ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHANNEL', '0'))  # ADS1115 channel for soil moisture sensor
+ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '0.0'))  # Zone altitude in meters above sea level
+ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '0.0'))  # Zone slope angle in degrees
+ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '0.0'))  # Zone area in square meters
+ZONE_BASE_PRESSURE_KPA = float(os.getenv('ZONE_BASE_PRESSURE_KPA', '200.0'))  # Base pressure requirement in kPa
+ZONE_ID = 1  # Hardcoded zone ID (always 1)
 
 # System thresholds
 MIN_SOIL_MOISTURE_PERCENT = float(os.getenv('MIN_SOIL_MOISTURE_PERCENT', '0.0'))  # 0% = completely dry (valid)

@@ -1,6 +1,7 @@
 """Fertigation API endpoints."""
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
+from app.config.config import ZONE_ID
 
 fertigation_bp = Blueprint('fertigation', __name__)
 api_bp.register_blueprint(fertigation_bp, url_prefix='/fertigation')
@@ -11,17 +12,8 @@ controllers = {}
 
 @fertigation_bp.route('/start', methods=['POST'])
 def start_fertigation():
-    """Start fertigation for a zone."""
+    """Start fertigation for the system zone."""
     try:
-        data = request.get_json() or {}
-        zone_id = data.get('zone_id')
-        
-        if not zone_id:
-            return jsonify({
-                'success': False,
-                'error': 'zone_id is required'
-            }), 400
-        
         fertigation_ctrl = controllers.get('fertigation')
         if not fertigation_ctrl:
             return jsonify({
@@ -29,7 +21,7 @@ def start_fertigation():
                 'error': 'Fertigation controller not initialized'
             }), 500
         
-        result = fertigation_ctrl.start_fertigation(zone_id)
+        result = fertigation_ctrl.start_fertigation(ZONE_ID)
         
         if result['success']:
             return jsonify(result), 200

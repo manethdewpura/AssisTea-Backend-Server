@@ -5,6 +5,9 @@ from datetime import datetime, time as dt_time
 from typing import Dict, Callable, Optional
 from app.config.database import get_db
 from app.models.schedule import IrrigationSchedule, FertigationSchedule
+from app.config.config import (
+    ZONE_ID, ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA
+)
 
 
 class TaskScheduler:
@@ -90,16 +93,15 @@ class TaskScheduler:
     def _trigger_irrigation(self, schedule: IrrigationSchedule, db):
         """Trigger irrigation for a schedule."""
         try:
-            # Get zone config (would need to be passed or retrieved)
-            # For now, create a basic config
+            # Use hardcoded zone config
             zone_config = {
-                'altitude': 0.0,  # Would come from ZoneConfig
-                'slope': 0.0,
-                'base_pressure': 200.0
+                'altitude': ZONE_ALTITUDE_M,
+                'slope': ZONE_SLOPE_DEGREES,
+                'base_pressure': ZONE_BASE_PRESSURE_KPA
             }
             
-            # Call callback
-            self.irrigation_callback(schedule.zone_id, zone_config)
+            # Call callback with hardcoded zone_id (schedule.zone_id should always be ZONE_ID)
+            self.irrigation_callback(ZONE_ID, zone_config)
             
             # Update last_run
             schedule.last_run = datetime.now()
@@ -111,8 +113,8 @@ class TaskScheduler:
     def _trigger_fertigation(self, schedule: FertigationSchedule, db):
         """Trigger fertigation for a schedule."""
         try:
-            # Call callback
-            self.fertigation_callback(schedule.zone_id)
+            # Call callback with hardcoded zone_id (schedule.zone_id should always be ZONE_ID)
+            self.fertigation_callback(ZONE_ID)
             
             # Update last_run
             schedule.last_run = datetime.now()

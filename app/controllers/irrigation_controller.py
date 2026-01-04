@@ -27,7 +27,7 @@ class IrrigationController:
                  decision_engine: HybridEngine,
                  soil_moisture_sensors: Dict[int, SoilMoistureSensor],
                  weather_reader: WeatherReader,
-                 pressure_sensors: Dict[int, PressureSensor],
+                 pressure_sensor: Optional[PressureSensor],
                  db_session_factory: Callable):
         """
         Initialize irrigation controller.
@@ -39,7 +39,7 @@ class IrrigationController:
             decision_engine: Decision engine instance
             soil_moisture_sensors: Dictionary mapping zone_id to soil moisture sensor
             weather_reader: Weather reader instance
-            pressure_sensors: Dictionary mapping zone_id to pressure sensor
+            pressure_sensor: System-wide irrigation pressure sensor (common for all zones)
             db_session_factory: Function that returns a database session
         """
         self.pressure_calculator = pressure_calculator
@@ -48,7 +48,7 @@ class IrrigationController:
         self.decision_engine = decision_engine
         self.soil_moisture_sensors = soil_moisture_sensors
         self.weather_reader = weather_reader
-        self.pressure_sensors = pressure_sensors
+        self.pressure_sensor = pressure_sensor
         self.db_session_factory = db_session_factory
         
         self.is_running = False
@@ -75,12 +75,36 @@ class IrrigationController:
             }
         
         # Check weather (skip if not clear)
-        weather_data = self.weather_reader.read_standardized()
+        try:
+            weather_data = self.weather_reader.read_standardized()
+        except Exception as e:
+            self._log_system(LogLevel.ERROR, 'irrigation_controller',
+                           f'Failed to read weather data: {str(e)}')
+            return {
+                'success': False,
+                'message': f'Failed to retrieve weather data: {str(e)}',
+                'error': 'weather_read_failed'
+            }
+        
+        # Log weather information for tracking
+        weather_source = 'ML prediction' if weather_data.get('is_ml_generated', False) else 'API'
+        weather_confidence = weather_data.get('confidence_score', 1.0)
+        self._log_system(LogLevel.INFO, 'irrigation_controller',
+                        f'Weather check: condition={weather_data["condition"]}, '
+                        f'temp={weather_data.get("temperature", "N/A")}°C, '
+                        f'humidity={weather_data.get("humidity", "N/A")}%, '
+                        f'source={weather_source}, confidence={weather_confidence:.2f}')
+        
         if weather_data['condition'] != 'clear':
             return {
                 'success': False,
                 'message': f'Weather condition is {weather_data["condition"]}, not suitable for irrigation',
-                'weather_condition': weather_data['condition']
+                'weather_condition': weather_data['condition'],
+                'weather_temperature': weather_data.get('temperature'),
+                'weather_humidity': weather_data.get('humidity'),
+                'weather_precipitation': weather_data.get('precipitation', 0.0),
+                'is_ml_generated': weather_data.get('is_ml_generated', False),
+                'confidence_score': weather_data.get('confidence_score', 1.0)
             }
         
         # Check soil moisture
@@ -98,13 +122,18 @@ class IrrigationController:
         decision = self.decision_engine.should_irrigate(current_moisture, weather_data['condition'])
         
         if not decision['should_irrigate']:
-            # Log skipped operation
-            self._log_operation(zone_id, OperationStatus.SKIPPED, start_moisture=current_moisture)
+            # Log skipped operation with weather info
+            self._log_operation(zone_id, OperationStatus.SKIPPED, 
+                              start_moisture=current_moisture,
+                              weather_info=weather_data)
             return {
                 'success': False,
                 'message': decision['reason'],
                 'current_moisture': current_moisture,
-                'decision': decision
+                'decision': decision,
+                'weather_condition': weather_data['condition'],
+                'weather_temperature': weather_data.get('temperature'),
+                'weather_humidity': weather_data.get('humidity')
             }
         
         # Start irrigation in background thread
@@ -114,7 +143,7 @@ class IrrigationController:
         
         self.operation_thread = threading.Thread(
             target=self._irrigation_cycle,
-            args=(zone_id, zone_config, current_moisture),
+            args=(zone_id, zone_config, current_moisture, weather_data),
             daemon=True
         )
         self.operation_thread.start()
@@ -123,14 +152,22 @@ class IrrigationController:
             'success': True,
             'message': f'Irrigation started for zone {zone_id}',
             'zone_id': zone_id,
-            'current_moisture': current_moisture
+            'current_moisture': current_moisture,
+            'weather_condition': weather_data['condition'],
+            'weather_temperature': weather_data.get('temperature'),
+            'weather_humidity': weather_data.get('humidity'),
+            'is_ml_generated': weather_data.get('is_ml_generated', False),
+            'confidence_score': weather_data.get('confidence_score', 1.0),
+            'decision': decision
         }
 
-    def _irrigation_cycle(self, zone_id: int, zone_config: Dict, start_moisture: float):
+    def _irrigation_cycle(self, zone_id: int, zone_config: Dict, start_moisture: float, weather_data: Dict = None):
         """Execute irrigation cycle."""
         try:
-            # Log operation start
-            self._log_operation(zone_id, OperationStatus.STARTED, start_moisture=start_moisture)
+            # Log operation start with weather info
+            self._log_operation(zone_id, OperationStatus.STARTED, 
+                              start_moisture=start_moisture,
+                              weather_info=weather_data)
             
             # Calculate required pressure
             pressure_calc = self.pressure_calculator.calculate_required_pressure(
@@ -152,7 +189,6 @@ class IrrigationController:
             
             # Monitor and maintain pressure while checking moisture
             soil_sensor = self.soil_moisture_sensors[zone_id]
-            pressure_sensor = self.pressure_sensors.get(zone_id)
             
             last_moisture_check = time.time()
             operation_start_time = time.time()
@@ -164,11 +200,11 @@ class IrrigationController:
                                     f'Irrigation timeout reached for zone {zone_id}')
                     break
                 
-                # Maintain pump pressure
+                # Maintain pump pressure using system-wide irrigation pressure sensor
                 current_pressure = None
-                if pressure_sensor:
+                if self.pressure_sensor:
                     try:
-                        pressure_data = pressure_sensor.read_standardized()
+                        pressure_data = self.pressure_sensor.read_standardized()
                         current_pressure = pressure_data['value']
                     except:
                         pass
@@ -224,11 +260,19 @@ class IrrigationController:
         # Calculate duration
         duration = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
         
+        # Get current weather for logging (optional, for completion record)
+        weather_info = None
+        try:
+            weather_info = self.weather_reader.read_standardized()
+        except:
+            pass
+        
         # Log completion
         self._log_operation(zone_id, OperationStatus.COMPLETED,
                            duration=duration,
                            start_moisture=start_moisture,
-                           end_moisture=end_moisture)
+                           end_moisture=end_moisture,
+                           weather_info=weather_info)
         
         self.is_running = False
         self.current_zone = None
@@ -263,17 +307,47 @@ class IrrigationController:
 
     def get_status(self) -> Dict[str, any]:
         """Get irrigation controller status."""
+        # Get current weather information
+        weather_info = None
+        try:
+            weather_data = self.weather_reader.read_standardized()
+            weather_info = {
+                'condition': weather_data.get('condition'),
+                'temperature': weather_data.get('temperature'),
+                'humidity': weather_data.get('humidity'),
+                'precipitation': weather_data.get('precipitation', 0.0),
+                'is_ml_generated': weather_data.get('is_ml_generated', False),
+                'confidence_score': weather_data.get('confidence_score', 1.0)
+            }
+        except Exception as e:
+            weather_info = {'error': str(e)}
+        
         return {
             'is_running': self.is_running,
             'current_zone': self.current_zone,
             'start_time': self.start_time.isoformat() if self.start_time else None,
-            'pump_status': self.pump_controller.get_status()
+            'pump_status': self.pump_controller.get_status(),
+            'weather': weather_info
         }
 
     def _log_operation(self, zone_id: int, status: OperationStatus, **kwargs):
         """Log operation to database."""
         try:
             db = next(self.db_session_factory())
+            
+            # Build notes string with weather info if available
+            notes = kwargs.get('notes', '')
+            weather_info = kwargs.get('weather_info')
+            if weather_info:
+                weather_note = f"Weather: {weather_info.get('condition', 'unknown')}, "
+                weather_note += f"temp={weather_info.get('temperature', 'N/A')}°C, "
+                weather_note += f"humidity={weather_info.get('humidity', 'N/A')}%, "
+                if weather_info.get('is_ml_generated'):
+                    weather_note += f"ML-generated (confidence={weather_info.get('confidence_score', 1.0):.2f})"
+                else:
+                    weather_note += "API data"
+                notes = f"{notes}; {weather_note}" if notes else weather_note
+            
             log = OperationalLog(
                 operation_type=OperationType.IRRIGATION,
                 zone_id=zone_id,
@@ -283,7 +357,7 @@ class IrrigationController:
                 flow_rate=kwargs.get('flow_rate'),
                 start_moisture=kwargs.get('start_moisture'),
                 end_moisture=kwargs.get('end_moisture'),
-                notes=kwargs.get('notes')
+                notes=notes
             )
             db.add(log)
             db.commit()
