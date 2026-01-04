@@ -19,12 +19,8 @@ def get_current_sensor_readings():
         # Read from all sensors
         for sensor_key, sensor in sensors_dict.items():
             try:
-                # Get the last reading if available, otherwise read new
-                reading = sensor.get_last_reading()
-                
-                if reading is None:
-                    # If no last reading, read from sensor
-                    reading = sensor.read_standardized()
+                # Always read fresh value from sensor for real-time monitoring
+                reading = sensor.read_standardized()
                 
                 # Format reading for API response
                 reading_data = {
@@ -82,12 +78,8 @@ def get_current_sensor_reading(sensor_type):
             }), 404
         
         try:
-            # Get the last reading if available, otherwise read new
-            reading = sensor.get_last_reading()
-            
-            if reading is None:
-                # If no last reading, read from sensor
-                reading = sensor.read_standardized()
+            # Always read fresh value from sensor for real-time monitoring
+            reading = sensor.read_standardized()
             
             # Format reading for API response
             reading_data = {
