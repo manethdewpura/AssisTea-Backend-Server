@@ -62,14 +62,31 @@ class SoilMoistureSensor(BaseSensor):
         raw_data = self.read_raw()
         raw_value = raw_data['value']
         
-        # Check if raw value indicates unconnected sensor (very low voltage < 0.01 = 1% of 3.3V)
-        # This helps detect when sensor is not connected
-        if raw_value < 0.01:
+        # Convert normalized value to voltage for validation
+        voltage = raw_value * 3.3  # Convert normalized (0-1) to voltage (0-3.3V)
+        
+        # Check if voltage is below 1V (normalized < 0.303) - indicates unconnected sensor
+        # 100% moisture is around 1.14V (0.344 normalized), so values below 1V are invalid
+        if voltage < 1.0:  # 1V threshold
             self.mark_failure()
-            raise Exception(f"Soil moisture sensor {self.sensor_id} appears unconnected (raw value: {raw_value:.4f} < 0.01)")
+            raise Exception(
+                f"Soil moisture sensor {self.sensor_id} appears unconnected or faulty "
+                f"(voltage: {voltage:.3f}V < 1.0V, normalized: {raw_value:.4f})"
+            )
         
         # Apply noise filtering
         filtered_value = self.noise_filter.filter(raw_value)
+        
+        # Check if filtered value is below wet_value (calibrated 100% point)
+        # This indicates the sensor is reading below the calibrated wet point, which shouldn't happen
+        # for a properly connected sensor (unless it's in a medium wetter than water)
+        if filtered_value < self.wet_value:
+            self.mark_failure()
+            raise Exception(
+                f"Soil moisture sensor {self.sensor_id} reading below calibrated wet value "
+                f"(raw: {filtered_value:.4f} < wet_value: {self.wet_value:.4f}, voltage: {filtered_value*3.3:.3f}V). "
+                f"Sensor may be unconnected or faulty."
+            )
         
         # Convert to percentage using calibration
         # Map from [dry_value, wet_value] to [0%, 100%]
