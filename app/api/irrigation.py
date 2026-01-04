@@ -1,6 +1,9 @@
 """Irrigation API endpoints."""
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
+from app.config.config import (
+    ZONE_ID, ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA
+)
 
 irrigation_bp = Blueprint('irrigation', __name__)
 api_bp.register_blueprint(irrigation_bp, url_prefix='/irrigation')
@@ -11,17 +14,8 @@ controllers = {}
 
 @irrigation_bp.route('/start', methods=['POST'])
 def start_irrigation():
-    """Start irrigation for a zone."""
+    """Start irrigation for the system zone."""
     try:
-        data = request.get_json() or {}
-        zone_id = data.get('zone_id')
-        
-        if not zone_id:
-            return jsonify({
-                'success': False,
-                'error': 'zone_id is required'
-            }), 400
-        
         irrigation_ctrl = controllers.get('irrigation')
         if not irrigation_ctrl:
             return jsonify({
@@ -29,15 +23,14 @@ def start_irrigation():
                 'error': 'Irrigation controller not initialized'
             }), 500
         
-        # Get zone config (would normally come from database)
-        zone_config = controllers.get('zone_configs', {}).get(zone_id)
-        if not zone_config:
-            return jsonify({
-                'success': False,
-                'error': f'Zone {zone_id} not configured'
-            }), 404
+        # Build zone_config dictionary from hardcoded config values
+        zone_config = {
+            'altitude': ZONE_ALTITUDE_M,
+            'slope': ZONE_SLOPE_DEGREES,
+            'base_pressure': ZONE_BASE_PRESSURE_KPA
+        }
         
-        result = irrigation_ctrl.start_irrigation(zone_id, zone_config)
+        result = irrigation_ctrl.start_irrigation(ZONE_ID, zone_config)
         
         if result['success']:
             return jsonify(result), 200

@@ -50,7 +50,8 @@ from app.hardware.pump_interface import SimplePumpController
 from app.hardware.valve_interface import SolenoidValveController
 from app.hardware.tank_valve_controller import TankValveController
 from app.config.config import (
-    PUMP_GPIO_PIN, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
+    IRRIGATION_PUMP_GPIO_PIN, FERTILIZER_PUMP_GPIO_PIN, IRRIGATION_PUMP_SOLENOID_PIN,
+    TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
     DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
 )
 
@@ -62,16 +63,33 @@ try:
 except Exception as e:
     logging.warning(f"ML background task not available: {e}")
 
-# Initialize pump and valves
+# Initialize solenoid state manager for persistent storage
+from app.services.solenoid_state_manager import SolenoidStateManager
+solenoid_state_manager = SolenoidStateManager()
+logging.info("✓ Solenoid state manager initialized")
+
+# Initialize pumps (separate irrigation and fertilizer pumps)
 # Note: Pressure reading is done via PressureSensor using ADS1115, not GPIO pin
-pump_controller_hw = SimplePumpController(gpio, PUMP_GPIO_PIN, pressure_sensor_pin=None)
+irrigation_pump_controller_hw = SimplePumpController(gpio, IRRIGATION_PUMP_GPIO_PIN, pressure_sensor_pin=None)
+fertilizer_pump_controller_hw = SimplePumpController(gpio, FERTILIZER_PUMP_GPIO_PIN, pressure_sensor_pin=None)
+
+# Initialize irrigation pump solenoid valve with state manager
+from app.hardware.irrigation_pump_solenoid import IrrigationPumpSolenoid
+irrigation_pump_solenoid = IrrigationPumpSolenoid(gpio, IRRIGATION_PUMP_SOLENOID_PIN, solenoid_state_manager)
+logging.info("✓ Irrigation pump solenoid initialized with state persistence")
+
+# Initialize tank valves with state manager
 tank_valve_controller = TankValveController(
-    gpio, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN
+    gpio, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN, solenoid_state_manager
 )
+logging.info("✓ Tank valve controller initialized with state persistence")
 
 # Initialize ADS1115 ADC for analog sensors (soil moisture and pressure)
 from app.hardware.ads1115_adc import ADS1115ADC
-from app.config.config import ADS1115_I2C_ADDRESS, ADS1115_PRESSURE_CHANNEL, ADS1115_SOIL_MOISTURE_CHANNEL
+from app.config.config import (
+    ADS1115_I2C_ADDRESS, ADS1115_PRESSURE_CHANNEL, 
+    ADS1115_FERTILIZER_PRESSURE_CHANNEL
+)
 
 # Create ADC instance (uses I2C on SDA/SCL pins)
 adc = ADS1115ADC(i2c_address=ADS1115_I2C_ADDRESS, use_mock=USE_MOCK_HARDWARE)
@@ -81,31 +99,47 @@ from app.sensors.pressure import PressureSensor
 from app.sensors.soil_moisture import SoilMoistureSensor
 from app.sensors.tank_level import TankLevelSensor
 from app.sensors.weather import WeatherReader
+from app.config.config import (
+    ZONE_ID, ZONE_VALVE_GPIO_PIN, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL
+)
 
-# Create sensor instances (example for zone 1, would be loaded from database)
-# Soil moisture and pressure sensors use ADS1115 ADC channels
-# ADS1115 has 4 channels (0-3), we can use different channels for different sensors
+# Initialize single zone with hardcoded configuration
 # Calibration values based on actual sensor readings:
 # Dry (out of water): 2.750V = 0.833 normalized (0% moisture)
 # Wet (in water): 1.136V = 0.344 normalized (100% moisture)
-soil_moisture_sensors = {
-    1: SoilMoistureSensor('soil_moisture_1', adc, ADS1115_SOIL_MOISTURE_CHANNEL, zone_id=1, 
-                          dry_value=0.833, wet_value=0.344),
-    2: SoilMoistureSensor('soil_moisture_2', adc, 2, zone_id=2, 
-                          dry_value=0.833, wet_value=0.344)  # Channel 2 for zone 2
-}
-pressure_sensors = {
-    1: PressureSensor('pressure_1', adc, ADS1115_PRESSURE_CHANNEL, zone_id=1),
-    2: PressureSensor('pressure_2', adc, 3, zone_id=2)  # Channel 3 for zone 2 pressure
-}
+logging.info(f"Initializing single zone (zone_id={ZONE_ID}) with hardcoded configuration")
+
+# Initialize soil moisture sensor for the single zone
+soil_moisture_sensors = {}
+zone_pins = {ZONE_ID: ZONE_VALVE_GPIO_PIN}
+
+# Create soil moisture sensor with hardcoded channel
+soil_moisture_sensors[ZONE_ID] = SoilMoistureSensor(
+    f'soil_moisture_{ZONE_ID}', 
+    adc, 
+    ZONE_SOIL_MOISTURE_SENSOR_CHANNEL, 
+    zone_id=ZONE_ID,
+    dry_value=0.833, 
+    wet_value=0.344
+)
+logging.info(f"✓ Soil moisture sensor initialized for zone {ZONE_ID} on ADS1115 channel {ZONE_SOIL_MOISTURE_SENSOR_CHANNEL}")
+logging.info(f"✓ Zone valve GPIO pin: {ZONE_VALVE_GPIO_PIN}")
+
+# Irrigation pump pressure sensor on A2 (channel 2) - system-wide (common for all zones)
+irrigation_pressure_sensor = PressureSensor('pressure_irrigation', adc, ADS1115_PRESSURE_CHANNEL, zone_id=None)  # A2 for irrigation pump
+logging.info("✓ Irrigation pressure sensor initialized (system-wide)")
+
+# Fertilizer pump pressure sensor on A3 (channel 3) - system-wide
+fertilizer_pressure_sensor = PressureSensor('pressure_fertilizer', adc, ADS1115_FERTILIZER_PRESSURE_CHANNEL, zone_id=None)  # A3 for fertilizer pump
+logging.info("✓ Fertilizer pressure sensor initialized (system-wide)")
 tank_level_sensor = TankLevelSensor(
     'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
 )
 weather_reader = WeatherReader(app=app)
 
-# Initialize zone valve controller (example zone pins, would come from database)
-zone_pins = {1: 17}  # Example: zone 1 uses GPIO pin 17
+# Initialize zone valve controller with hardcoded zone pin
 valve_controller_hw = SolenoidValveController(gpio, zone_pins)
+logging.info(f"✓ Zone valve controller initialized with zone {ZONE_ID} (GPIO pin {ZONE_VALVE_GPIO_PIN})")
 
 # Initialize hydraulic components
 from app.hydraulics.pressure_calculator import PressureCalculator
@@ -114,7 +148,8 @@ from app.hydraulics.pump_controller import HydraulicPumpController
 
 pressure_calculator = PressureCalculator(reference_altitude_m=0.0)
 valve_controller = HydraulicValveController(valve_controller_hw)
-pump_controller = HydraulicPumpController(pump_controller_hw)
+irrigation_pump_controller = HydraulicPumpController(irrigation_pump_controller_hw)
+fertilizer_pump_controller = HydraulicPumpController(fertilizer_pump_controller_hw)
 
 # Initialize decision engine
 from app.decision_engine.hybrid_engine import HybridEngine
@@ -127,21 +162,26 @@ from app.controllers.fertigation_controller import FertigationController
 irrigation_controller = IrrigationController(
     pressure_calculator=pressure_calculator,
     valve_controller=valve_controller,
-    pump_controller=pump_controller,
+    pump_controller=irrigation_pump_controller,
     decision_engine=decision_engine,
     soil_moisture_sensors=soil_moisture_sensors,
     weather_reader=weather_reader,
-    pressure_sensors=pressure_sensors,
+    pressure_sensor=irrigation_pressure_sensor,
     db_session_factory=get_db
 )
 
+# Initialize fertigation controller with separate irrigation and fertilizer pumps
 fertigation_controller = FertigationController(
     valve_controller=valve_controller,
     tank_valve_controller=tank_valve_controller,
     tank_level_sensor=tank_level_sensor,
     db_session_factory=get_db,
     weather_reader=weather_reader,
-    check_weather=True  # Enable weather checking for fertigation
+    check_weather=False,  # Weather checking disabled per specification
+    pressure_sensor=fertilizer_pressure_sensor,  # A3 pressure sensor for fertilizer pump
+    fertilizer_pump_controller=fertilizer_pump_controller,  # Fertilizer pump (GPIO 22)
+    irrigation_pump_controller=irrigation_pump_controller,  # Irrigation pump (GPIO 23)
+    irrigation_pump_solenoid=irrigation_pump_solenoid  # Irrigation pump solenoid (GPIO 24)
 )
 
 # Initialize fail-safe mechanisms
@@ -154,14 +194,29 @@ sensor_failure_handler = SensorFailureHandler(get_db)
 abnormal_reading_handler = AbnormalReadingHandler(get_db)
 
 all_sensors = {}
-# Add sensors with proper type names as keys
+# Add all soil moisture sensors (dynamically loaded from database)
 for zone_id, sensor in soil_moisture_sensors.items():
     all_sensors[f'soil_moisture_{zone_id}'] = sensor
-for zone_id, sensor in pressure_sensors.items():
-    all_sensors[f'pressure_{zone_id}'] = sensor
+    logging.info(f"✓ Added soil moisture sensor for zone {zone_id} to sensors dict")
+
+# Add irrigation pressure sensor (system-wide, common for all zones)
+all_sensors['pressure_irrigation'] = irrigation_pressure_sensor
+logging.info("✓ Added irrigation pressure sensor to sensors dict (system-wide)")
+
+# Add fertilizer pressure sensor (system-wide)
+all_sensors['pressure_fertilizer'] = fertilizer_pressure_sensor
+logging.info("✓ Added fertilizer pressure sensor to sensors dict")
+
+# Add tank level sensor
 all_sensors['tank_level'] = tank_level_sensor
-# Note: weather sensor is excluded from all_sensors as it's not needed in the mobile app
-# all_sensors['weather'] = weather_reader
+logging.info("✓ Added tank level sensor to sensors dict")
+
+logging.info(f"✓ Total sensors registered: {len(all_sensors)}")
+logging.info(f"  - Soil moisture sensors: {len(soil_moisture_sensors)}")
+logging.info(f"  - Irrigation pressure sensor: 1 (system-wide)")
+logging.info(f"  - Fertilizer pressure sensor: 1 (system-wide)")
+logging.info(f"  - Tank level sensor: 1")
+logging.info(f"  - Available sensor keys: {list(all_sensors.keys())}")
 
 health_monitor = HealthMonitor(all_sensors, emergency_stop, get_db)
 
@@ -186,20 +241,28 @@ from app.api import api_bp
 app.register_blueprint(api_bp)
 
 # Set up API controller references
-from app.api import system, irrigation, fertigation, sensors
+from app.api import system, irrigation, fertigation, sensors, solenoids
 system.system_state['controllers'] = {
     'irrigation': irrigation_controller,
     'fertigation': fertigation_controller
 }
 irrigation.controllers = {
-    'irrigation': irrigation_controller,
-    'zone_configs': {1: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}}  # Example config
+    'irrigation': irrigation_controller
 }
 fertigation.controllers = {
     'fertigation': fertigation_controller
 }
 # Set up sensors reference for API
 sensors.sensors_dict = all_sensors
+logging.info(f"✓ Sensors dict set in API module with {len(all_sensors)} sensors: {list(all_sensors.keys())}")
+
+# Set up hardware instances for mock value control (only in mock mode)
+if USE_MOCK_HARDWARE:
+    sensors.adc_instance = adc
+    sensors.gpio_instance = gpio
+
+# Set up solenoid state manager for API
+solenoids.state_manager = solenoid_state_manager
 
 # Root route
 @app.route('/')

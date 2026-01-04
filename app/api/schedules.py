@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, request
 from app.api import api_bp
 from app.config.database import get_db
 from app.models.schedule import IrrigationSchedule, FertigationSchedule
+from app.config.config import ZONE_ID
 from datetime import time as dt_time
 
 schedules_bp = Blueprint('schedules', __name__)
@@ -44,10 +45,10 @@ def create_irrigation_schedule():
     try:
         data = request.get_json()
         
-        if not data or not all(k in data for k in ['zone_id', 'day_of_week', 'time']):
+        if not data or not all(k in data for k in ['day_of_week', 'time']):
             return jsonify({
                 'success': False,
-                'error': 'zone_id, day_of_week, and time are required'
+                'error': 'day_of_week and time are required'
             }), 400
         
         db = next(get_db())
@@ -58,7 +59,7 @@ def create_irrigation_schedule():
         schedule_time = dt_time(int(time_parts[0]), int(time_parts[1]), int(time_parts[2]) if len(time_parts) > 2 else 0)
         
         schedule = IrrigationSchedule(
-            zone_id=data['zone_id'],
+            zone_id=ZONE_ID,
             day_of_week=data['day_of_week'],
             time=schedule_time,
             enabled=data.get('enabled', True)
@@ -97,8 +98,8 @@ def update_irrigation_schedule(schedule_id):
                 'error': 'Schedule not found'
             }), 404
         
-        if 'zone_id' in data:
-            schedule.zone_id = data['zone_id']
+        # zone_id is always ZONE_ID (hardcoded to 1)
+        schedule.zone_id = ZONE_ID
         if 'day_of_week' in data:
             schedule.day_of_week = data['day_of_week']
         if 'time' in data:
@@ -189,10 +190,10 @@ def create_fertigation_schedule():
     try:
         data = request.get_json()
         
-        if not data or not all(k in data for k in ['zone_id', 'day_of_week', 'time']):
+        if not data or not all(k in data for k in ['day_of_week', 'time']):
             return jsonify({
                 'success': False,
-                'error': 'zone_id, day_of_week, and time are required'
+                'error': 'day_of_week and time are required'
             }), 400
         
         db = next(get_db())
@@ -202,7 +203,7 @@ def create_fertigation_schedule():
         schedule_time = dt_time(int(time_parts[0]), int(time_parts[1]), int(time_parts[2]) if len(time_parts) > 2 else 0)
         
         schedule = FertigationSchedule(
-            zone_id=data['zone_id'],
+            zone_id=ZONE_ID,
             day_of_week=data['day_of_week'],
             time=schedule_time,
             enabled=data.get('enabled', True)
@@ -241,8 +242,8 @@ def update_fertigation_schedule(schedule_id):
                 'error': 'Schedule not found'
             }), 404
         
-        if 'zone_id' in data:
-            schedule.zone_id = data['zone_id']
+        # zone_id is always ZONE_ID (hardcoded to 1)
+        schedule.zone_id = ZONE_ID
         if 'day_of_week' in data:
             schedule.day_of_week = data['day_of_week']
         if 'time' in data:

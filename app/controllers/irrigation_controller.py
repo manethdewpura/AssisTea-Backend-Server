@@ -27,7 +27,7 @@ class IrrigationController:
                  decision_engine: HybridEngine,
                  soil_moisture_sensors: Dict[int, SoilMoistureSensor],
                  weather_reader: WeatherReader,
-                 pressure_sensors: Dict[int, PressureSensor],
+                 pressure_sensor: Optional[PressureSensor],
                  db_session_factory: Callable):
         """
         Initialize irrigation controller.
@@ -39,7 +39,7 @@ class IrrigationController:
             decision_engine: Decision engine instance
             soil_moisture_sensors: Dictionary mapping zone_id to soil moisture sensor
             weather_reader: Weather reader instance
-            pressure_sensors: Dictionary mapping zone_id to pressure sensor
+            pressure_sensor: System-wide irrigation pressure sensor (common for all zones)
             db_session_factory: Function that returns a database session
         """
         self.pressure_calculator = pressure_calculator
@@ -48,7 +48,7 @@ class IrrigationController:
         self.decision_engine = decision_engine
         self.soil_moisture_sensors = soil_moisture_sensors
         self.weather_reader = weather_reader
-        self.pressure_sensors = pressure_sensors
+        self.pressure_sensor = pressure_sensor
         self.db_session_factory = db_session_factory
         
         self.is_running = False
@@ -189,7 +189,6 @@ class IrrigationController:
             
             # Monitor and maintain pressure while checking moisture
             soil_sensor = self.soil_moisture_sensors[zone_id]
-            pressure_sensor = self.pressure_sensors.get(zone_id)
             
             last_moisture_check = time.time()
             operation_start_time = time.time()
@@ -201,11 +200,11 @@ class IrrigationController:
                                     f'Irrigation timeout reached for zone {zone_id}')
                     break
                 
-                # Maintain pump pressure
+                # Maintain pump pressure using system-wide irrigation pressure sensor
                 current_pressure = None
-                if pressure_sensor:
+                if self.pressure_sensor:
                     try:
-                        pressure_data = pressure_sensor.read_standardized()
+                        pressure_data = self.pressure_sensor.read_standardized()
                         current_pressure = pressure_data['value']
                     except:
                         pass
