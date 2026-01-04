@@ -20,7 +20,8 @@ packaging>=24.0
 networkx>=3.0
 numpy==2.3.5
 scipy==1.16.3
-RPi.GPIO==0.7.1
+# comment out for Windows/Mac development
+RPi.GPIO==0.7.1 # Uncomment for Raspberry Pi deployment only
 adafruit-circuitpython-ads1x15==3.0.2
 adafruit-circuitpython-busdevice==5.2.14
 adafruit-blinka==8.67.0
