@@ -39,8 +39,9 @@ class ADS1115ADC:
         
         if not self.use_mock:
             try:
-                # Initialize I2C bus (SDA and SCL pins)
-                i2c = busio.I2C(board.SCL, board.SDA)
+                # Initialize I2C bus - use board.I2C() for automatic detection
+                # This works better on Raspberry Pi than specifying pins directly
+                i2c = board.I2C()  # Automatically uses the default I2C bus
                 self.ads = ADS.ADS1115(i2c, address=i2c_address)
             except Exception as e:
                 print(f"Warning: Could not initialize ADS1115, using mock: {str(e)}")
@@ -72,15 +73,8 @@ class ADS1115ADC:
                 # Return mock channel
                 self.channels[channel] = MockAnalogIn(channel, self.mock_values[channel])
             else:
-                # Create real AnalogIn channel
-                if channel == self.CHANNEL_0:
-                    self.channels[channel] = AnalogIn(self.ads, ADS.P0)
-                elif channel == self.CHANNEL_1:
-                    self.channels[channel] = AnalogIn(self.ads, ADS.P1)
-                elif channel == self.CHANNEL_2:
-                    self.channels[channel] = AnalogIn(self.ads, ADS.P2)
-                elif channel == self.CHANNEL_3:
-                    self.channels[channel] = AnalogIn(self.ads, ADS.P3)
+                # Create real AnalogIn channel - use integer directly
+                self.channels[channel] = AnalogIn(self.ads, channel)
         
         return self.channels[channel]
 
