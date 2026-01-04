@@ -85,9 +85,14 @@ from app.sensors.weather import WeatherReader
 # Create sensor instances (example for zone 1, would be loaded from database)
 # Soil moisture and pressure sensors use ADS1115 ADC channels
 # ADS1115 has 4 channels (0-3), we can use different channels for different sensors
+# Calibration values based on actual sensor readings:
+# Dry (out of water): 2.750V = 0.833 normalized (0% moisture)
+# Wet (in water): 1.136V = 0.344 normalized (100% moisture)
 soil_moisture_sensors = {
-    1: SoilMoistureSensor('soil_moisture_1', adc, ADS1115_SOIL_MOISTURE_CHANNEL, zone_id=1),
-    2: SoilMoistureSensor('soil_moisture_2', adc, 2, zone_id=2)  # Channel 2 for zone 2
+    1: SoilMoistureSensor('soil_moisture_1', adc, ADS1115_SOIL_MOISTURE_CHANNEL, zone_id=1, 
+                          dry_value=0.833, wet_value=0.344),
+    2: SoilMoistureSensor('soil_moisture_2', adc, 2, zone_id=2, 
+                          dry_value=0.833, wet_value=0.344)  # Channel 2 for zone 2
 }
 pressure_sensors = {
     1: PressureSensor('pressure_1', adc, ADS1115_PRESSURE_CHANNEL, zone_id=1),

@@ -5,6 +5,7 @@ from app.sensors.base import BaseSensor
 from app.hardware.ads1115_adc import ADS1115ADC
 from app.utils.noise_filter import NoiseFilter
 from app.utils.unit_converter import UnitConverter
+from app.config.config import MIN_SOIL_MOISTURE_PERCENT, MAX_SOIL_MOISTURE_PERCENT
 
 
 class SoilMoistureSensor(BaseSensor):
@@ -61,6 +62,12 @@ class SoilMoistureSensor(BaseSensor):
         raw_data = self.read_raw()
         raw_value = raw_data['value']
         
+        # Check if raw value indicates unconnected sensor (very low voltage < 0.01 = 1% of 3.3V)
+        # This helps detect when sensor is not connected
+        if raw_value < 0.01:
+            self.mark_failure()
+            raise Exception(f"Soil moisture sensor {self.sensor_id} appears unconnected (raw value: {raw_value:.4f} < 0.01)")
+        
         # Apply noise filtering
         filtered_value = self.noise_filter.filter(raw_value)
         
@@ -73,6 +80,17 @@ class SoilMoistureSensor(BaseSensor):
             normalized = (filtered_value - self.dry_value) / (self.wet_value - self.dry_value)
             # Clamp to 0-1 and convert to percentage
             moisture_percent = max(0.0, min(100.0, normalized * 100.0))
+        
+        # Validate the final moisture percentage is within expected range
+        if moisture_percent < MIN_SOIL_MOISTURE_PERCENT or moisture_percent > MAX_SOIL_MOISTURE_PERCENT:
+            self.mark_failure()
+            raise Exception(
+                f"Soil moisture {moisture_percent:.1f}% outside valid range "
+                f"[{MIN_SOIL_MOISTURE_PERCENT}, {MAX_SOIL_MOISTURE_PERCENT}]%"
+            )
+        
+        # Mark as successful if we got here
+        self.mark_success()
         
         reading = {
             'value': moisture_percent,
