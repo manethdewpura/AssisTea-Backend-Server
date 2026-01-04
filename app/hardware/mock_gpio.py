@@ -32,11 +32,8 @@ class MockGPIO(GPIOInterface):
         if pin not in self.pins:
             raise ValueError(f"Pin {pin} not set up")
         
-        if self.pins[pin]['mode'] == 'input':
-            # Simulate some variation in readings
-            if random.random() < 0.1:  # 10% chance of noise
-                self.pin_states[pin] = not self.pin_states[pin]
-        
+        # For mock mode, don't auto-update pin states - use manually set values
+        # This allows manual control of sensor values for testing
         return self.pin_states.get(pin, False)
 
     def write_pin(self, pin: int, value: bool):
@@ -55,12 +52,10 @@ class MockGPIO(GPIOInterface):
         if pin not in self.pins:
             raise ValueError(f"Pin {pin} not set up")
         
+        # For mock mode, return the manually set value without auto-update
+        # This allows precise control of sensor values for testing
         if pin not in self.analog_values:
-            self.analog_values[pin] = random.uniform(0.0, 1.0)
-        else:
-            # Simulate small variations
-            self.analog_values[pin] += random.uniform(-0.01, 0.01)
-            self.analog_values[pin] = max(0.0, min(1.0, self.analog_values[pin]))
+            self.analog_values[pin] = 0.5  # Default value
         
         return self.analog_values[pin]
 
