@@ -96,9 +96,10 @@ class IrrigationController:
                         f'source={weather_source}, confidence={weather_confidence:.2f}')
         
         if weather_data['condition'] != 'clear':
+            weather_display = weather_data['condition'].capitalize()
             return {
                 'success': False,
-                'message': f'Weather condition is {weather_data["condition"]}, not suitable for irrigation',
+                'message': f'Irrigation skipped: Weather is {weather_display.lower()}',
                 'weather_condition': weather_data['condition'],
                 'weather_temperature': weather_data.get('temperature'),
                 'weather_humidity': weather_data.get('humidity'),
@@ -126,11 +127,32 @@ class IrrigationController:
             self._log_operation(zone_id, OperationStatus.SKIPPED, 
                               start_moisture=current_moisture,
                               weather_info=weather_data)
+            
+            # Ensure all values are JSON-serializable
+            def make_json_serializable(obj):
+                """Recursively convert numpy types and other non-JSON types to Python types."""
+                import numpy as np
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.bool_):
+                    return bool(obj)
+                elif isinstance(obj, dict):
+                    return {key: make_json_serializable(value) for key, value in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [make_json_serializable(item) for item in obj]
+                else:
+                    return obj
+            
+            # Use user-friendly message if available, otherwise fall back to reason
+            error_message = decision.get('user_message', decision.get('reason', 'Irrigation skipped'))
+            
             return {
                 'success': False,
-                'message': decision['reason'],
-                'current_moisture': current_moisture,
-                'decision': decision,
+                'message': error_message,
+                'current_moisture': float(current_moisture),
+                'decision': make_json_serializable(decision),
                 'weather_condition': weather_data['condition'],
                 'weather_temperature': weather_data.get('temperature'),
                 'weather_humidity': weather_data.get('humidity')

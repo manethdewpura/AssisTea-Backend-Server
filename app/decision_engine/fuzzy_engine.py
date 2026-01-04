@@ -105,12 +105,13 @@ class FuzzyEngine:
             irrigation_need_score = 50.0
         
         # Determine decision (threshold at 50)
-        should_irrigate = irrigation_need_score >= 50.0
+        # Convert numpy bool to Python bool for JSON serialization
+        should_irrigate = bool(irrigation_need_score >= 50.0)
         
         return {
             'irrigation_need_score': float(irrigation_need_score),
             'should_irrigate': should_irrigate,
-            'confidence': abs(irrigation_need_score - 50) / 50.0,  # Normalize to 0-1
+            'confidence': float(abs(irrigation_need_score - 50) / 50.0),  # Normalize to 0-1
             'reason': f'Fuzzy inference: irrigation need score = {irrigation_need_score:.1f}'
         }
 
