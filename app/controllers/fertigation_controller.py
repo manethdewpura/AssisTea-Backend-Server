@@ -6,6 +6,7 @@ from datetime import datetime
 from app.hydraulics.valve_controller import HydraulicValveController
 from app.hardware.tank_valve_controller import TankValveController
 from app.sensors.tank_level import TankLevelSensor
+from app.sensors.weather import WeatherReader
 from app.config.config import TANK_EMPTY_LEVEL_CM, TANK_FULL_LEVEL_CM, MAX_OPERATION_DURATION_SEC
 from app.models.operational_log import OperationalLog, OperationType, OperationStatus
 from app.models.system_log import SystemLog, LogLevel
@@ -17,7 +18,9 @@ class FertigationController:
     def __init__(self, valve_controller: HydraulicValveController,
                  tank_valve_controller: TankValveController,
                  tank_level_sensor: TankLevelSensor,
-                 db_session_factory: Callable):
+                 db_session_factory: Callable,
+                 weather_reader: Optional[WeatherReader] = None,
+                 check_weather: bool = False):
         """
         Initialize fertigation controller.
         
@@ -26,11 +29,15 @@ class FertigationController:
             tank_valve_controller: Tank valve controller for inlet/outlet
             tank_level_sensor: Tank level sensor instance
             db_session_factory: Function that returns a database session
+            weather_reader: Optional weather reader instance for weather checking
+            check_weather: Whether to check weather conditions before fertigation (default: False)
         """
         self.valve_controller = valve_controller
         self.tank_valve_controller = tank_valve_controller
         self.tank_level_sensor = tank_level_sensor
         self.db_session_factory = db_session_factory
+        self.weather_reader = weather_reader
+        self.check_weather = check_weather
         
         self.is_running = False
         self.current_zone: Optional[int] = None
@@ -40,7 +47,6 @@ class FertigationController:
     def start_fertigation(self, zone_id: int) -> Dict[str, any]:
         """
         Start fertigation cycle for a zone.
-        Note: Weather and soil moisture are intentionally ignored per requirements.
         
         Args:
             zone_id: Zone ID to fertigate
@@ -54,6 +60,21 @@ class FertigationController:
                 'message': 'Fertigation already in progress',
                 'current_zone': self.current_zone
             }
+        
+        # Check weather if enabled
+        if self.check_weather and self.weather_reader:
+            try:
+                weather_data = self.weather_reader.read_standardized()
+                # Allow fertigation in clear or cloudy conditions, but warn about rainy conditions
+                if weather_data['condition'] == 'rainy':
+                    return {
+                        'success': False,
+                        'message': f'Weather condition is {weather_data["condition"]}, not suitable for fertigation',
+                        'weather_condition': weather_data['condition']
+                    }
+            except Exception as e:
+                self._log_system(LogLevel.WARNING, 'fertigation_controller',
+                               f'Failed to check weather: {str(e)}, proceeding with fertigation')
         
         # Start fertigation in background thread
         self.is_running = True

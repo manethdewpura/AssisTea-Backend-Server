@@ -101,7 +101,7 @@ pressure_sensors = {
 tank_level_sensor = TankLevelSensor(
     'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
 )
-weather_reader = WeatherReader()
+weather_reader = WeatherReader(app=app)
 
 # Initialize zone valve controller (example zone pins, would come from database)
 zone_pins = {1: 17}  # Example: zone 1 uses GPIO pin 17
@@ -139,7 +139,9 @@ fertigation_controller = FertigationController(
     valve_controller=valve_controller,
     tank_valve_controller=tank_valve_controller,
     tank_level_sensor=tank_level_sensor,
-    db_session_factory=get_db
+    db_session_factory=get_db,
+    weather_reader=weather_reader,
+    check_weather=True  # Enable weather checking for fertigation
 )
 
 # Initialize fail-safe mechanisms
