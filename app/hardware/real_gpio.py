@@ -30,7 +30,11 @@ class RealGPIO(GPIOInterface):
             elif pull_up_down == 'down':
                 pull = GPIO.PUD_DOWN
             
-            GPIO.setup(pin, GPIO.IN, pull_up_down=pull)
+            # Only pass pull_up_down if it's not None
+            if pull is not None:
+                GPIO.setup(pin, GPIO.IN, pull_up_down=pull)
+            else:
+                GPIO.setup(pin, GPIO.IN)
         elif mode == 'output':
             GPIO.setup(pin, GPIO.OUT)
         else:
