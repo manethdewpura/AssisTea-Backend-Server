@@ -148,8 +148,8 @@ from app.hydraulics.pump_controller import HydraulicPumpController
 
 pressure_calculator = PressureCalculator(reference_altitude_m=0.0)
 valve_controller = HydraulicValveController(valve_controller_hw)
-irrigation_pump_controller = HydraulicPumpController(irrigation_pump_controller_hw)
-fertilizer_pump_controller = HydraulicPumpController(fertilizer_pump_controller_hw)
+irrigation_pump_controller = HydraulicPumpController(irrigation_pump_controller_hw, pressure_sensor=irrigation_pressure_sensor)
+fertilizer_pump_controller = HydraulicPumpController(fertilizer_pump_controller_hw, pressure_sensor=fertilizer_pressure_sensor)
 
 # Initialize decision engine
 from app.decision_engine.hybrid_engine import HybridEngine

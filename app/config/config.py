@@ -30,9 +30,9 @@ DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27')
 # Zone Configuration (hardcoded - single zone system)
 ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin for zone valve control
 ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHANNEL', '0'))  # ADS1115 channel for soil moisture sensor
-ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '0.0'))  # Zone altitude in meters above sea level
-ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '0.0'))  # Zone slope angle in degrees
-ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '0.0'))  # Zone area in square meters
+ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '680.0'))  # Zone altitude in meters above sea level
+ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '25.0'))  # Zone slope angle in degrees
+ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '1200.0'))  # Zone area in square meters
 ZONE_BASE_PRESSURE_KPA = float(os.getenv('ZONE_BASE_PRESSURE_KPA', '200.0'))  # Base pressure requirement in kPa
 ZONE_ID = 1  # Hardcoded zone ID (always 1)
 
@@ -67,4 +67,10 @@ ABNORMAL_READING_THRESHOLD = float(os.getenv('ABNORMAL_READING_THRESHOLD', '3.0'
 
 # Weather database path (existing SQLite database)
 WEATHER_DB_PATH = os.getenv('WEATHER_DB_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'database', 'weather.db'))
+
+# Timezone configuration for schedules
+# Defaults to Sri Lanka timezone (Asia/Colombo)
+# Examples: 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'UTC'
+# Use timezone name from IANA Time Zone Database (https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+SCHEDULE_TIMEZONE = os.getenv('SCHEDULE_TIMEZONE', 'Asia/Colombo')  # Sri Lanka timezone
 

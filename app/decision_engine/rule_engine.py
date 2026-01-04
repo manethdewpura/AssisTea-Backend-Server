@@ -30,14 +30,17 @@ class RuleEngine:
         # Rule 1: Skip if weather is not clear
         if weather_condition != 'clear':
             decision['should_irrigate'] = False
-            decision['reason'] = f'Weather condition is {weather_condition}, not suitable for irrigation'
+            weather_display = weather_condition.capitalize()
+            decision['reason'] = f'Weather is {weather_display.lower()}. Irrigation is not recommended in {weather_display.lower()} conditions.'
+            decision['user_message'] = f'Irrigation skipped: Weather is {weather_display.lower()}'
             decision['confidence'] = 1.0
             return decision
         
         # Rule 2: Skip if soil moisture is adequate
         if soil_moisture_percent >= ADEQUATE_SOIL_MOISTURE_PERCENT:
             decision['should_irrigate'] = False
-            decision['reason'] = f'Soil moisture {soil_moisture_percent:.1f}% is adequate (>= {ADEQUATE_SOIL_MOISTURE_PERCENT}%)'
+            decision['reason'] = f'Soil moisture is adequate at {soil_moisture_percent:.1f}% (target: {ADEQUATE_SOIL_MOISTURE_PERCENT}%)'
+            decision['user_message'] = f'Irrigation skipped: Soil moisture is adequate ({soil_moisture_percent:.1f}%)'
             decision['confidence'] = 1.0
             return decision
         

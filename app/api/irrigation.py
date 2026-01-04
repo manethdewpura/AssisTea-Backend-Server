@@ -35,12 +35,23 @@ def start_irrigation():
         if result['success']:
             return jsonify(result), 200
         else:
+            # Return the actual error message from the result
             return jsonify(result), 400
             
+    except TypeError as e:
+        # Handle JSON serialization errors specifically
+        if 'not JSON serializable' in str(e):
+            return jsonify({
+                'success': False,
+                'error': 'Internal error: Data serialization failed',
+                'message': 'An error occurred while processing the irrigation request. Please try again.'
+            }), 500
+        raise
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'message': str(e)
         }), 500
 
 
