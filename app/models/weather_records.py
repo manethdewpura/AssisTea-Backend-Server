@@ -193,6 +193,159 @@ class WeatherForecast(db.Model):
         }
 
 
+def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) -> tuple:
+    """
+    Interpolate missing hourly weather data to create a continuous timeline.
+    Handles intermittent data with time gaps due to connection interruptions.
+    
+    Args:
+        historical_data: List of weather record dicts with timestamps (milliseconds)
+        lookback_hours: Target number of hourly records needed (default: 48)
+    
+    Returns:
+        Tuple of (interpolated_data_list, interpolation_count)
+        - interpolated_data_list: Continuous hourly records (exactly lookback_hours records)
+        - interpolation_count: Number of records that were interpolated
+    """
+    from datetime import datetime, timedelta
+    import numpy as np
+    
+    if not historical_data:
+        return [], 0
+    
+    # Sort by timestamp to ensure chronological order
+    sorted_data = sorted(historical_data, key=lambda x: x['timestamp'])
+    
+    # If we already have enough continuous hourly data, no interpolation needed
+    if len(sorted_data) >= lookback_hours:
+        # Check if data is already continuous (hourly intervals)
+        is_continuous = True
+        for i in range(1, min(len(sorted_data), lookback_hours)):
+            time_diff_hours = (sorted_data[i]['timestamp'] - sorted_data[i-1]['timestamp']) / (1000 * 3600)
+            if abs(time_diff_hours - 1.0) > 0.5:  # Allow 30min tolerance
+                is_continuous = False
+                break
+        
+        if is_continuous:
+            return sorted_data[-lookback_hours:], 0
+    
+    # Create continuous hourly timeline from oldest to newest
+    oldest_timestamp = sorted_data[0]['timestamp']
+    newest_timestamp = sorted_data[-1]['timestamp']
+    
+    # Calculate how many hours we need from oldest to newest
+    time_span_hours = (newest_timestamp - oldest_timestamp) / (1000 * 3600)
+    
+    # If time span is less than lookback_hours, we'll create from oldest to (oldest + lookback_hours)
+    if time_span_hours < lookback_hours:
+        target_end_timestamp = oldest_timestamp + (lookback_hours * 3600 * 1000)
+    else:
+        target_end_timestamp = newest_timestamp
+    
+    # Generate hourly timestamps
+    continuous_timeline = []
+    current_ts = oldest_timestamp
+    end_ts = target_end_timestamp
+    
+    while current_ts <= end_ts:
+        continuous_timeline.append(current_ts)
+        current_ts += 3600 * 1000  # Add 1 hour in milliseconds
+    
+    # Take last lookback_hours entries to match requirements
+    if len(continuous_timeline) > lookback_hours:
+        continuous_timeline = continuous_timeline[-lookback_hours:]
+    
+    # Build index of existing data by timestamp (rounded to nearest hour)
+    data_by_hour = {}
+    for record in sorted_data:
+        # Round timestamp to nearest hour
+        hour_key = round(record['timestamp'] / (3600 * 1000)) * (3600 * 1000)
+        if hour_key not in data_by_hour:
+            data_by_hour[hour_key] = record
+    
+    # Interpolate missing values
+    interpolated_data = []
+    interpolation_count = 0
+    
+    for target_ts in continuous_timeline:
+        hour_key = round(target_ts / (3600 * 1000)) * (3600 * 1000)
+        
+        if hour_key in data_by_hour:
+            # Use existing data
+            interpolated_data.append(data_by_hour[hour_key].copy())
+        else:
+            # Need to interpolate
+            interpolation_count += 1
+            
+            # Find nearest records before and after this timestamp
+            before_record = None
+            after_record = None
+            
+            for record in sorted_data:
+                if record['timestamp'] <= target_ts:
+                    if before_record is None or record['timestamp'] > before_record['timestamp']:
+                        before_record = record
+                if record['timestamp'] >= target_ts:
+                    if after_record is None or record['timestamp'] < after_record['timestamp']:
+                        after_record = record
+            
+            # Interpolate values
+            if before_record and after_record and before_record != after_record:
+                # Linear interpolation
+                time_diff = after_record['timestamp'] - before_record['timestamp']
+                weight = (target_ts - before_record['timestamp']) / time_diff if time_diff > 0 else 0.5
+                
+                interpolated_record = {
+                    'timestamp': target_ts,
+                    # Linear interpolation for numeric values
+                    'temp': before_record['temp'] + (after_record['temp'] - before_record['temp']) * weight,
+                    'feels_like': before_record['feels_like'] + (after_record['feels_like'] - before_record['feels_like']) * weight,
+                    'temp_min': before_record['temp_min'] + (after_record['temp_min'] - before_record['temp_min']) * weight,
+                    'temp_max': before_record['temp_max'] + (after_record['temp_max'] - before_record['temp_max']) * weight,
+                    'pressure': before_record['pressure'] + (after_record['pressure'] - before_record['pressure']) * weight,
+                    'humidity': before_record['humidity'] + (after_record['humidity'] - before_record['humidity']) * weight,
+                    'wind_speed': before_record['wind_speed'] + (after_record['wind_speed'] - before_record['wind_speed']) * weight,
+                    # Nearest neighbor for directional/categorical
+                    'wind_deg': before_record['wind_deg'] if weight < 0.5 else after_record['wind_deg'],
+                    'clouds_all': int(before_record['clouds_all'] + (after_record['clouds_all'] - before_record['clouds_all']) * weight),
+                    # Conservative: no rain interpolation (zero-fill)
+                    'rain_1h': 0.0,
+                    'rain_3h': 0.0,
+                }
+            elif before_record:
+                # Only before record available - forward fill
+                interpolated_record = before_record.copy()
+                interpolated_record['timestamp'] = target_ts
+                interpolated_record['rain_1h'] = 0.0  # Don't carry forward rain
+                interpolated_record['rain_3h'] = 0.0
+            elif after_record:
+                # Only after record available - backward fill
+                interpolated_record = after_record.copy()
+                interpolated_record['timestamp'] = target_ts
+                interpolated_record['rain_1h'] = 0.0
+                interpolated_record['rain_3h'] = 0.0
+            else:
+                # No surrounding data - use defaults (should be rare)
+                interpolated_record = {
+                    'timestamp': target_ts,
+                    'temp': 25.0,
+                    'feels_like': 25.0,
+                    'temp_min': 24.0,
+                    'temp_max': 26.0,
+                    'pressure': 1010.0,
+                    'humidity': 80.0,
+                    'wind_speed': 2.0,
+                    'wind_deg': 220.0,
+                    'clouds_all': 75,
+                    'rain_1h': 0.0,
+                    'rain_3h': 0.0,
+                }
+            
+            interpolated_data.append(interpolated_record)
+    
+    return interpolated_data, interpolation_count
+
+
 def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int = None):
     """
     Build historical weather data for ML prediction using both weather_current and weather_forecast tables.
@@ -450,11 +603,37 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
     if len(historical_data) > target_records:
         historical_data = historical_data[-target_records:]
     
+    # Step 4: Apply interpolation if we still don't have enough continuous data
+    interpolation_count = 0
+    if len(historical_data) < lookback_hours:
+        # We have some data but not enough - use interpolation to fill gaps
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Applying interpolation: have {len(historical_data)} records, need {lookback_hours}")
+        
+        historical_data, interpolation_count = interpolate_weather_data(historical_data, lookback_hours)
+        
+        logger.info(f"After interpolation: {len(historical_data)} records ({interpolation_count} interpolated)")
+    
     # Remove 'source' field before returning (not needed for ML model)
     for record in historical_data:
         record.pop('source', None)
     
+    # Update data source info with interpolation metrics
+    data_source_info['interpolated_count'] = interpolation_count
+    data_source_info['interpolation_ratio'] = interpolation_count / len(historical_data) if len(historical_data) > 0 else 0
     data_source_info['has_sufficient_data'] = len(historical_data) >= lookback_hours  # Need full lookback period
+    
+    # Calculate data quality rating
+    if interpolation_count == 0:
+        data_quality = "excellent"
+    elif data_source_info['interpolation_ratio'] < 0.2:
+        data_quality = "good"
+    elif data_source_info['interpolation_ratio'] < 0.5:
+        data_quality = "fair"
+    else:
+        data_quality = "poor"
+    data_source_info['data_quality'] = data_quality
     
     return historical_data, city_info, data_source_info
 

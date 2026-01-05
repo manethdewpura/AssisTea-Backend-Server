@@ -123,12 +123,27 @@ class MLBackgroundTask:
             current_records_created = 0
             
             # Calculate confidence score based on data sources used
-            # API data: 1.0, Real+Forecast: 0.75, With ML predictions: 0.55
+            # Base confidence tiers:
+            # - API data only: 1.0
+            # - Real + Forecast: 0.75
+            # - With ML predictions: 0.55
+            # - Adjust down for interpolation (up to -30% penalty)
             base_confidence = 1.0
             if data_source_info['forecast_count'] > 0:
                 base_confidence = 0.75
             if data_source_info.get('ml_prediction_count', 0) > 0:
                 base_confidence = 0.55
+            
+            # Apply interpolation penalty
+            interpolation_ratio = data_source_info.get('interpolation_ratio', 0)
+            if interpolation_ratio > 0:
+                # Reduce confidence by interpolation_ratio * 0.3 (max 30% penalty)
+                interpolation_penalty = interpolation_ratio * 0.3
+                base_confidence = base_confidence * (1 - interpolation_penalty)
+                logger.info(
+                    f"Interpolation applied: {data_source_info.get('interpolated_count', 0)} records "
+                    f"({interpolation_ratio:.1%}), confidence reduced to {base_confidence:.2f}"
+                )
             
             for pred_record in predicted_records:
                 # 1. Store in weather_forecast table
