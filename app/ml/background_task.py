@@ -138,6 +138,7 @@ class MLBackgroundTask:
             interpolation_ratio = data_source_info.get('interpolation_ratio', 0)
             if interpolation_ratio > 0:
                 # Reduce confidence by interpolation_ratio * 0.3 (max 30% penalty)
+                #TODO: define moreabout the use of max 30% penalty
                 interpolation_penalty = interpolation_ratio * 0.3
                 base_confidence = base_confidence * (1 - interpolation_penalty)
                 logger.info(

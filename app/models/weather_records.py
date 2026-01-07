@@ -1,5 +1,8 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+import logging
+from copy import deepcopy
+from bisect import bisect_left
 
 db = SQLAlchemy()
 
@@ -206,9 +209,16 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
         Tuple of (interpolated_data_list, interpolation_count)
         - interpolated_data_list: Continuous hourly records (exactly lookback_hours records)
         - interpolation_count: Number of records that were interpolated
+    
+        Notes:
+                - Records are bucketed by nearest hour. If multiple observations fall into the
+                    same hour, the most recent record is retained to minimize data loss.
+                - This function assumes individual weather records contain only primitive values.
+                    If nested structures (lists/dicts) are introduced, deep copies are used to
+                    avoid accidental mutation of source records in the interpolation process.
+                - Nearest-neighbor search uses binary search over sorted timestamps for
+                    O(log n) lookup per gap to scale efficiently on larger datasets.
     """
-    from datetime import datetime, timedelta
-    import numpy as np
     
     if not historical_data:
         return [], 0
@@ -218,9 +228,10 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
     
     # If we already have enough continuous hourly data, no interpolation needed
     if len(sorted_data) >= lookback_hours:
-        # Check if data is already continuous (hourly intervals)
+        # Check if the LAST lookback_hours records are continuous (hourly intervals)
         is_continuous = True
-        for i in range(1, min(len(sorted_data), lookback_hours)):
+        start_idx = len(sorted_data) - lookback_hours + 1
+        for i in range(start_idx, len(sorted_data)):
             time_diff_hours = (sorted_data[i]['timestamp'] - sorted_data[i-1]['timestamp']) / (1000 * 3600)
             if abs(time_diff_hours - 1.0) > 0.5:  # Allow 30min tolerance
                 is_continuous = False
@@ -239,15 +250,24 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
     # If time span is less than lookback_hours, we'll create from oldest to (oldest + lookback_hours)
     if time_span_hours < lookback_hours:
         target_end_timestamp = oldest_timestamp + (lookback_hours * 3600 * 1000)
+        if target_end_timestamp > newest_timestamp:
+            hours_extrapolated = int(round((target_end_timestamp - newest_timestamp) / (3600 * 1000)))
+            logging.getLogger(__name__).warning(
+                "interpolate_weather_data: Not enough history (%s h available). Extrapolating %s h beyond latest data; forward-filled values may reduce prediction quality.",
+                int(round(time_span_hours)), hours_extrapolated
+            )
     else:
         target_end_timestamp = newest_timestamp
     
     # Generate hourly timestamps
     continuous_timeline = []
     current_ts = oldest_timestamp
-    end_ts = target_end_timestamp
     
-    while current_ts <= end_ts:
+    # Use counter to ensure exactly the right number of iterations 
+    # Calculate how many hours between oldest and target_end_timestamp
+    hours_to_generate = int(round((target_end_timestamp - oldest_timestamp) / (3600 * 1000)))
+    
+    for _ in range(hours_to_generate + 1):
         continuous_timeline.append(current_ts)
         current_ts += 3600 * 1000  # Add 1 hour in milliseconds
     
@@ -256,38 +276,36 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
         continuous_timeline = continuous_timeline[-lookback_hours:]
     
     # Build index of existing data by timestamp (rounded to nearest hour)
+    # Strategy: keep the most recent record within each hour bucket to avoid data loss
+    # when multiple observations exist in the same hour.
     data_by_hour = {}
     for record in sorted_data:
         # Round timestamp to nearest hour
         hour_key = round(record['timestamp'] / (3600 * 1000)) * (3600 * 1000)
-        if hour_key not in data_by_hour:
+        existing = data_by_hour.get(hour_key)
+        if existing is None or record['timestamp'] > existing['timestamp']:
             data_by_hour[hour_key] = record
     
     # Interpolate missing values
     interpolated_data = []
     interpolation_count = 0
+    # Precompute sorted timestamps for O(log n) neighbor lookup
+    sorted_timestamps = [rec['timestamp'] for rec in sorted_data]
     
     for target_ts in continuous_timeline:
         hour_key = round(target_ts / (3600 * 1000)) * (3600 * 1000)
         
         if hour_key in data_by_hour:
-            # Use existing data
-            interpolated_data.append(data_by_hour[hour_key].copy())
+            # Use existing data (deep copy to be safe if nested structures appear later)
+            interpolated_data.append(deepcopy(data_by_hour[hour_key]))
         else:
             # Need to interpolate
             interpolation_count += 1
             
-            # Find nearest records before and after this timestamp
-            before_record = None
-            after_record = None
-            
-            for record in sorted_data:
-                if record['timestamp'] <= target_ts:
-                    if before_record is None or record['timestamp'] > before_record['timestamp']:
-                        before_record = record
-                if record['timestamp'] >= target_ts:
-                    if after_record is None or record['timestamp'] < after_record['timestamp']:
-                        after_record = record
+            # Find nearest records before and after using binary search
+            idx = bisect_left(sorted_timestamps, target_ts)
+            before_record = sorted_data[idx - 1] if idx > 0 else None
+            after_record = sorted_data[idx] if idx < len(sorted_data) else None
             
             # Interpolate values
             if before_record and after_record and before_record != after_record:
@@ -308,24 +326,26 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
                     # Nearest neighbor for directional/categorical
                     'wind_deg': before_record['wind_deg'] if weight < 0.5 else after_record['wind_deg'],
                     'clouds_all': int(before_record['clouds_all'] + (after_record['clouds_all'] - before_record['clouds_all']) * weight),
-                    # Conservative: no rain interpolation (zero-fill)
+                    # Conservative: no rain interpolation
+                    #TODO: define moreabout the use of rain interpolation
                     'rain_1h': 0.0,
                     'rain_3h': 0.0,
                 }
             elif before_record:
                 # Only before record available - forward fill
-                interpolated_record = before_record.copy()
+                interpolated_record = deepcopy(before_record)
                 interpolated_record['timestamp'] = target_ts
                 interpolated_record['rain_1h'] = 0.0  # Don't carry forward rain
                 interpolated_record['rain_3h'] = 0.0
             elif after_record:
                 # Only after record available - backward fill
-                interpolated_record = after_record.copy()
+                interpolated_record = deepcopy(after_record)
                 interpolated_record['timestamp'] = target_ts
                 interpolated_record['rain_1h'] = 0.0
                 interpolated_record['rain_3h'] = 0.0
             else:
-                # No surrounding data - use defaults (should be rare)
+                # No surrounding data - use defaults
+                #ToDO: define moreabout the use of default values
                 interpolated_record = {
                     'timestamp': target_ts,
                     'temp': 25.0,
@@ -625,6 +645,7 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
     data_source_info['has_sufficient_data'] = len(historical_data) >= lookback_hours  # Need full lookback period
     
     # Calculate data quality rating
+    #TODO: define moreabout the use of data quality rating
     if interpolation_count == 0:
         data_quality = "excellent"
     elif data_source_info['interpolation_ratio'] < 0.2:

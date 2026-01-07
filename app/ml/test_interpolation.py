@@ -1,5 +1,5 @@
 """
-Simple test script to verify interpolation functionality
+Simple manual test script to verify interpolation functionality
 Tests the build_historical_data_for_prediction function with current database
 """
 
@@ -18,13 +18,73 @@ import os
 os.environ['FLASK_APP'] = 'main'
 
 from flask import Flask
-from app.models.weather_records import db, WeatherCurrent, WeatherForecast, build_historical_data_for_prediction
+from app.models.weather_records import (
+    db,
+    WeatherCurrent,
+    WeatherForecast,
+    build_historical_data_for_prediction,
+    interpolate_weather_data,
+)
 
 # Create minimal Flask app
 app = Flask(__name__)
 basedir = Path(__file__).parent.parent.parent
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{basedir}/database/weather.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+def _validate_hourly(timestamps_ms):
+    one_hour_ms = 3600 * 1000
+    for i in range(1, len(timestamps_ms)):
+        if timestamps_ms[i] - timestamps_ms[i-1] != one_hour_ms:
+            return False
+    return True
+
+
+def run_synthetic_interpolation_scenarios():
+    from datetime import datetime, timedelta
+
+    print("\n[3] Synthetic interpolation scenarios:")
+
+    # Base time aligned to hour
+    base = datetime(2024, 1, 1, 0, 0)
+    ms = lambda dt: int(dt.timestamp() * 1000)
+
+    # A) Duplicates within the same hour: keep most recent per bucket
+    print("\n  A) Duplicate records within the same hour")
+    records = [
+        {'timestamp': ms(base + timedelta(hours=0, minutes=15)), 'temp': 20, 'feels_like': 20, 'temp_min': 19, 'temp_max': 21, 'pressure': 1000, 'humidity': 50, 'wind_speed': 2, 'wind_deg': 90, 'rain_1h': 0, 'rain_3h': 0},
+        {'timestamp': ms(base + timedelta(hours=0, minutes=45)), 'temp': 21, 'feels_like': 21, 'temp_min': 20, 'temp_max': 22, 'pressure': 1001, 'humidity': 51, 'wind_speed': 2.5, 'wind_deg': 100, 'rain_1h': 0, 'rain_3h': 0},
+        {'timestamp': ms(base + timedelta(hours=1)), 'temp': 22, 'feels_like': 22, 'temp_min': 21, 'temp_max': 23, 'pressure': 1002, 'humidity': 52, 'wind_speed': 3, 'wind_deg': 110, 'rain_1h': 0, 'rain_3h': 0},
+    ]
+    out, count = interpolate_weather_data(records, lookback_hours=2)
+    print(f"    - Output len={len(out)}, interpolated={count}")
+    print(f"    - First hour temp should be from latest within hour (21): {out[0]['temp']}")
+
+    # B) Large gaps: ensure interpolation fills to exact window
+    print("\n  B) Gapped records over long span")
+    sparse = []
+    for h in [0, 10, 25, 47, 80]:
+        sparse.append({'timestamp': ms(base + timedelta(hours=h)), 'temp': 15 + h*0.1, 'feels_like': 15 + h*0.1,
+                       'temp_min': 14 + h*0.1, 'temp_max': 16 + h*0.1, 'pressure': 1000, 'humidity': 60,
+                       'wind_speed': 2, 'wind_deg': 180, 'rain_1h': 0, 'rain_3h': 0})
+    out, count = interpolate_weather_data(sparse, lookback_hours=48)
+    ts = [r['timestamp'] for r in out]
+    print(f"    - Output len={len(out)}, interpolated={count}")
+    print(f"    - Continuous hourly: {_validate_hourly(ts)}")
+    print(f"    - Oldest ts: {datetime.fromtimestamp(ts[0]/1000)} | Newest ts: {datetime.fromtimestamp(ts[-1]/1000)}")
+
+    # C) Insufficient span (forces extrapolation warning & forward-fill end)
+    print("\n  C) Insufficient timespan; extrapolation beyond latest data")
+    short = []
+    for h in range(0, 6):
+        short.append({'timestamp': ms(base + timedelta(hours=h)), 'temp': 10 + h, 'feels_like': 10 + h,
+                      'temp_min': 9 + h, 'temp_max': 11 + h, 'pressure': 1000, 'humidity': 55,
+                      'wind_speed': 1.5, 'wind_deg': 200, 'rain_1h': 0, 'rain_3h': 0})
+    out, count = interpolate_weather_data(short, lookback_hours=12)
+    ts = [r['timestamp'] for r in out]
+    print(f"    - Output len={len(out)}, interpolated={count}")
+    print(f"    - Continuous hourly: {_validate_hourly(ts)}")
+
 
 with app.app_context():
     db.init_app(app)
@@ -80,6 +140,9 @@ with app.app_context():
         print(f"\n✗ Error: {e}")
         import traceback
         traceback.print_exc()
+
+    # Run synthetic checks to validate interpolation changes
+    run_synthetic_interpolation_scenarios()
     
     print("\n" + "="*70)
     print("TEST COMPLETE")
