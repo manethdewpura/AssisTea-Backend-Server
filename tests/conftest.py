@@ -23,7 +23,8 @@ from app.hardware.tank_valve_controller import TankValveController
 from app.config.config import (
     PUMP_GPIO_PIN, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
     DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
-    ADS1115_PRESSURE_CHANNEL, ADS1115_SOIL_MOISTURE_CHANNEL
+    ADS1115_PRESSURE_CHANNEL, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
+    ZONE_SOIL_MOISTURE_DRY_VALUE, ZONE_SOIL_MOISTURE_WET_VALUE
 )
 
 
@@ -78,7 +79,7 @@ def mock_adc():
     """Create a mock ADC instance with controllable values."""
     adc = ADS1115ADC(i2c_address=0x48, use_mock=True)
     # Initialize with default values
-    adc.set_mock_value(ADS1115_SOIL_MOISTURE_CHANNEL, 0.6)  # ~50% moisture
+    adc.set_mock_value(ZONE_SOIL_MOISTURE_SENSOR_CHANNEL, 0.6)  # ~50% moisture
     adc.set_mock_value(ADS1115_PRESSURE_CHANNEL, 0.5)  # ~250 kPa
     return adc
 
@@ -88,12 +89,12 @@ def mock_soil_moisture_sensors(mock_adc):
     """Create mock soil moisture sensors."""
     sensors = {
         1: SoilMoistureSensor(
-            'soil_moisture_1', mock_adc, ADS1115_SOIL_MOISTURE_CHANNEL,
-            zone_id=1, dry_value=0.833, wet_value=0.344
+            'soil_moisture_1', mock_adc, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
+            zone_id=1, dry_value=ZONE_SOIL_MOISTURE_DRY_VALUE, wet_value=ZONE_SOIL_MOISTURE_WET_VALUE
         ),
         2: SoilMoistureSensor(
             'soil_moisture_2', mock_adc, 2, zone_id=2,
-            dry_value=0.833, wet_value=0.344
+            dry_value=ZONE_SOIL_MOISTURE_DRY_VALUE, wet_value=ZONE_SOIL_MOISTURE_WET_VALUE
         )
     }
     return sensors

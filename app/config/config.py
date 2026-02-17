@@ -1,6 +1,16 @@
 """System configuration settings."""
 import os
 
+# Load environment variables from `.env` early (so values below can be adjusted via env).
+# This will NOT override already-set environment variables (e.g. production deployments).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except Exception:
+    # If python-dotenv isn't available or `.env` is missing, fall back to real env vars.
+    pass
+
 # Environment detection
 IS_RASPBERRY_PI = os.path.exists('/proc/device-tree/model') or os.getenv('USE_REAL_GPIO', 'false').lower() == 'true'
 USE_MOCK_HARDWARE = not IS_RASPBERRY_PI or os.getenv('USE_MOCK_HARDWARE', 'false').lower() == 'true'
@@ -20,16 +30,28 @@ PUMP_GPIO_PIN = IRRIGATION_PUMP_GPIO_PIN
 
 # ADS1115 ADC Configuration (for soil moisture and pressure sensors)
 ADS1115_I2C_ADDRESS = int(os.getenv('ADS1115_I2C_ADDRESS', '0x48'), 16)  # Default I2C address
-ADS1115_PRESSURE_CHANNEL = int(os.getenv('ADS1115_PRESSURE_CHANNEL', '2'))  # Channel 2 (A2) for irrigation pump pressure
-ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(os.getenv('ADS1115_FERTILIZER_PRESSURE_CHANNEL', '3'))  # Channel 3 (A3) for fertilizer pump pressure
+# Pressure sensor ADC channels (0-3). Supports clearer alias env var names too.
+ADS1115_PRESSURE_CHANNEL = int(
+    os.getenv('IRRIGATION_PRESSURE_ADC_CHANNEL', os.getenv('ADS1115_PRESSURE_CHANNEL', '2'))
+)  # Channel 2 (A2) for irrigation pump pressure
+ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(
+    os.getenv('FERTILIZER_PRESSURE_ADC_CHANNEL', os.getenv('ADS1115_FERTILIZER_PRESSURE_CHANNEL', '3'))
+)  # Channel 3 (A3) for fertilizer pump pressure
 
 # Sensor pins (for digital sensors and tank level)
-DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '6'))  # Tank level sensor trigger
-DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo
+DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '22'))  # Tank level sensor trigger (TRIG)
+DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo (ECHO)
 
 # Zone Configuration (hardcoded - single zone system)
 ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin for zone valve control
-ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHANNEL', '0'))  # ADS1115 channel for soil moisture sensor
+# ADS1115 channel for soil moisture sensor (0-3)
+ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHANNEL', '0'))
+# Soil moisture calibration (normalized ADC reading, 0.0-1.0)
+# Defaults based on the project's measured values:
+# - dry (0%): 2.750V ≈ 0.833 normalized
+# - wet (100%): 1.136V ≈ 0.344 normalized
+ZONE_SOIL_MOISTURE_DRY_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_DRY_VALUE', '0.833'))
+ZONE_SOIL_MOISTURE_WET_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_WET_VALUE', '0.344'))
 ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '680.0'))  # Zone altitude in meters above sea level
 ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '25.0'))  # Zone slope angle in degrees
 ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '1200.0'))  # Zone area in square meters
