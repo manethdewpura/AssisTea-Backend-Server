@@ -25,9 +25,6 @@ IRRIGATION_PUMP_SOLENOID_PIN = int(os.getenv('IRRIGATION_PUMP_SOLENOID_PIN', '24
 TANK_INLET_SOLENOID_PIN = int(os.getenv('TANK_INLET_SOLENOID_PIN', '25'))  # Tank inlet solenoid
 TANK_OUTLET_SOLENOID_PIN = int(os.getenv('TANK_OUTLET_SOLENOID_PIN', '26'))  # Tank outlet solenoid
 
-# Legacy support (for backward compatibility)
-PUMP_GPIO_PIN = IRRIGATION_PUMP_GPIO_PIN
-
 # ADS1115 ADC Configuration (for soil moisture and pressure sensors)
 ADS1115_I2C_ADDRESS = int(os.getenv('ADS1115_I2C_ADDRESS', '0x48'), 16)  # Default I2C address
 # Pressure sensor ADC channels (0-3). Supports clearer alias env var names too.

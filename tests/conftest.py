@@ -21,7 +21,7 @@ from app.hardware.pump_interface import SimplePumpController
 from app.hardware.valve_interface import SolenoidValveController
 from app.hardware.tank_valve_controller import TankValveController
 from app.config.config import (
-    PUMP_GPIO_PIN, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
+    IRRIGATION_PUMP_GPIO_PIN, TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
     DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
     ADS1115_PRESSURE_CHANNEL, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
     ZONE_SOIL_MOISTURE_DRY_VALUE, ZONE_SOIL_MOISTURE_WET_VALUE
@@ -160,7 +160,7 @@ def irrigation_controller(mock_gpio, mock_adc, mock_soil_moisture_sensors,
                          mock_pressure_sensors, mock_weather_reader, temp_db):
     """Create an irrigation controller with mocked dependencies."""
     # Initialize hardware
-    pump_controller_hw = SimplePumpController(mock_gpio, PUMP_GPIO_PIN, pressure_sensor_pin=None)
+    pump_controller_hw = SimplePumpController(mock_gpio, IRRIGATION_PUMP_GPIO_PIN, pressure_sensor_pin=None)
     zone_pins = {1: 17, 2: 18}
     valve_controller_hw = SolenoidValveController(mock_gpio, zone_pins)
     
