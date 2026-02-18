@@ -326,6 +326,16 @@ def sync_weather_forecast():
                 db.session.add(forecast_record)
                 records_created += 1
         
+        # Clean up old records (keep last 10 days for efficiency)
+        # This prevents database from growing indefinitely
+        cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
+        if city_id:
+            WeatherForecast.query.filter_by(city_id=city_id).filter(
+                WeatherForecast.timestamp < cutoff_time
+            ).delete()
+        else:
+            WeatherForecast.query.filter(WeatherForecast.timestamp < cutoff_time).delete()
+        
         try:
             db.session.commit()
         except IntegrityError:
@@ -623,6 +633,16 @@ def sync_all_weather_data():
                     
                     db.session.add(forecast_record)
                     forecast_created += 1
+            
+            # Clean up old forecast records (keep last 10 days for efficiency)
+            # This prevents database from growing indefinitely
+            cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
+            if city_id:
+                WeatherForecast.query.filter_by(city_id=city_id).filter(
+                    WeatherForecast.timestamp < cutoff_time
+                ).delete()
+            else:
+                WeatherForecast.query.filter(WeatherForecast.timestamp < cutoff_time).delete()
             
             results['forecast'] = {
                 'created': forecast_created,
