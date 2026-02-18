@@ -145,9 +145,9 @@
     "test_samples": 5180
   },
   "deployment_requirements": {
-    "python": "3.8+",
-    "tflite_runtime": "2.14.0+",
+    "python": "3.11+",
+    "tensorflow": "2.14.0+",
     "numpy": "1.24.0+",
-    "note": "Pure TFLite - no TensorFlow needed!"
+    "note": "Uses full TensorFlow package for both development and Raspberry Pi deployment"
   }
 }
