@@ -92,6 +92,24 @@ The server will start on `http://0.0.0.0:5000` (accessible at `http://localhost:
 - **TensorFlow Lite Runtime**: For Raspberry Pi, uncomment `tflite-runtime>=2.14.0` in `requirements.txt` and use it instead of full TensorFlow
 - **Environment Variables**: Configure GPIO pins and sensor channels via environment variables (see `app/config/config.py`)
 
+#### Pressure sensor env vars (ADS1115)
+
+- **`ADS1115_I2C_ADDRESS`**: ADS1115 I2C address (default `0x48`)
+- **Irrigation pressure sensor channel (A0-A3)**:
+  - **`IRRIGATION_PRESSURE_ADC_CHANNEL`** (preferred), or **`ADS1115_PRESSURE_CHANNEL`** (legacy)
+  - Default: `2` (ADS1115 A2)
+- **Fertilizer pressure sensor channel (A0-A3)**:
+  - **`FERTILIZER_PRESSURE_ADC_CHANNEL`** (preferred), or **`ADS1115_FERTILIZER_PRESSURE_CHANNEL`** (legacy)
+  - Default: `3` (ADS1115 A3)
+
+#### Soil moisture sensor env vars (ADS1115)
+
+- **`ZONE_SOIL_MOISTURE_SENSOR_CHANNEL`**
+  - Default: `0` (ADS1115 A0)
+- **Calibration (normalized ADC readings)**:
+  - **`ZONE_SOIL_MOISTURE_DRY_VALUE`**: normalized reading at 0% moisture (default `0.833`)
+  - **`ZONE_SOIL_MOISTURE_WET_VALUE`**: normalized reading at 100% moisture (default `0.344`)
+
 ### Database Initialization
 
 The system automatically initializes two SQLite databases on first run:

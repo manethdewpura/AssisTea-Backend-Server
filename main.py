@@ -100,7 +100,11 @@ from app.sensors.soil_moisture import SoilMoistureSensor
 from app.sensors.tank_level import TankLevelSensor
 from app.sensors.weather import WeatherReader
 from app.config.config import (
-    ZONE_ID, ZONE_VALVE_GPIO_PIN, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL
+    ZONE_ID,
+    ZONE_VALVE_GPIO_PIN,
+    ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
+    ZONE_SOIL_MOISTURE_DRY_VALUE,
+    ZONE_SOIL_MOISTURE_WET_VALUE,
 )
 
 # Initialize single zone with hardcoded configuration
@@ -119,8 +123,8 @@ soil_moisture_sensors[ZONE_ID] = SoilMoistureSensor(
     adc, 
     ZONE_SOIL_MOISTURE_SENSOR_CHANNEL, 
     zone_id=ZONE_ID,
-    dry_value=0.833, 
-    wet_value=0.344
+    dry_value=ZONE_SOIL_MOISTURE_DRY_VALUE,
+    wet_value=ZONE_SOIL_MOISTURE_WET_VALUE,
 )
 logging.info(f"✓ Soil moisture sensor initialized for zone {ZONE_ID} on ADS1115 channel {ZONE_SOIL_MOISTURE_SENSOR_CHANNEL}")
 logging.info(f"✓ Zone valve GPIO pin: {ZONE_VALVE_GPIO_PIN}")
