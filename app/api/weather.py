@@ -129,12 +129,14 @@ def sync_current_weather():
         # Clean up old records (keep last 10 days for efficiency)
         # This prevents database from growing indefinitely
         cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
-        if location_id:
-            WeatherCurrent.query.filter_by(location_id=location_id).filter(
-                WeatherCurrent.timestamp < cutoff_time
-            ).delete()
-        else:
-            WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete()
+        # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+        with db.session.no_autoflush:
+            if location_id:
+                WeatherCurrent.query.filter_by(location_id=location_id).filter(
+                    WeatherCurrent.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
+            else:
+                WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete(synchronize_session=False)
         
         # Create new current weather record 
         try:
@@ -329,12 +331,17 @@ def sync_weather_forecast():
         # Clean up old records (keep last 10 days for efficiency)
         # This prevents database from growing indefinitely
         cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
-        if city_id:
-            WeatherForecast.query.filter_by(city_id=city_id).filter(
-                WeatherForecast.timestamp < cutoff_time
-            ).delete()
-        else:
-            WeatherForecast.query.filter(WeatherForecast.timestamp < cutoff_time).delete()
+        # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+        with db.session.no_autoflush:
+            if city_id is not None:
+                WeatherForecast.query.filter_by(city_id=city_id).filter(
+                    WeatherForecast.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
+            elif city_id is None:
+                WeatherForecast.query.filter(
+                    WeatherForecast.city_id.is_(None),
+                    WeatherForecast.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
         
         try:
             db.session.commit()
@@ -467,12 +474,14 @@ def sync_all_weather_data():
                 else:
                     # Clean up old records (keep last 10 days for efficiency)
                     cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
-                    if location_id:
-                        WeatherCurrent.query.filter_by(location_id=location_id).filter(
-                            WeatherCurrent.timestamp < cutoff_time
-                        ).delete()
-                    else:
-                        WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete()
+                    # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+                    with db.session.no_autoflush:
+                        if location_id:
+                            WeatherCurrent.query.filter_by(location_id=location_id).filter(
+                                WeatherCurrent.timestamp < cutoff_time
+                            ).delete(synchronize_session=False)
+                        else:
+                            WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete(synchronize_session=False)
                     
                     try:
                         weather_record = WeatherCurrent(
@@ -637,12 +646,17 @@ def sync_all_weather_data():
             # Clean up old forecast records (keep last 10 days for efficiency)
             # This prevents database from growing indefinitely
             cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
-            if city_id:
-                WeatherForecast.query.filter_by(city_id=city_id).filter(
-                    WeatherForecast.timestamp < cutoff_time
-                ).delete()
-            else:
-                WeatherForecast.query.filter(WeatherForecast.timestamp < cutoff_time).delete()
+            # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+            with db.session.no_autoflush:
+                if city_id is not None:
+                    WeatherForecast.query.filter_by(city_id=city_id).filter(
+                        WeatherForecast.timestamp < cutoff_time
+                    ).delete(synchronize_session=False)
+                elif city_id is None:
+                    WeatherForecast.query.filter(
+                        WeatherForecast.city_id.is_(None),
+                        WeatherForecast.timestamp < cutoff_time
+                    ).delete(synchronize_session=False)
             
             results['forecast'] = {
                 'created': forecast_created,
