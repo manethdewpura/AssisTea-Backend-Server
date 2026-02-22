@@ -1,6 +1,10 @@
 """System control API endpoints."""
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
+from app.config.config import (
+    ZONE_ID, ZONE_VALVE_GPIO_PIN, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
+    ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_AREA_M2, ZONE_BASE_PRESSURE_KPA
+)
 
 system_bp = Blueprint('system', __name__)
 api_bp.register_blueprint(system_bp, url_prefix='/system')
@@ -81,6 +85,31 @@ def get_system_status():
         return jsonify({
             'success': True,
             'status': status
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@system_bp.route('/zone-info', methods=['GET'])
+def get_zone_info():
+    """Get zone configuration information (read-only)."""
+    try:
+        zone_info = {
+            'zone_id': ZONE_ID,
+            'valve_gpio_pin': ZONE_VALVE_GPIO_PIN,
+            'soil_moisture_sensor_channel': ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
+            'altitude': ZONE_ALTITUDE_M,
+            'slope': ZONE_SLOPE_DEGREES,
+            'area': ZONE_AREA_M2,
+            'base_pressure': ZONE_BASE_PRESSURE_KPA
+        }
+        
+        return jsonify({
+            'success': True,
+            'zone': zone_info
         }), 200
     except Exception as e:
         return jsonify({

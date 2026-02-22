@@ -1,21 +1,23 @@
 """Pump controller for maintaining target pressure."""
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import time
 from app.hardware.pump_interface import PumpInterface
-from app.config.config import PUMP_PRESSURE_TOLERANCE_KPA, PUMP_ADJUSTMENT_INTERVAL_SEC
+from app.config.config import PUMP_PRESSURE_TOLERANCE_KPA, PUMP_ADJUSTMENT_INTERVAL_SEC, USE_MOCK_HARDWARE
 
 
 class HydraulicPumpController:
     """Controller for maintaining pump pressure within target range."""
 
-    def __init__(self, pump_interface: PumpInterface):
+    def __init__(self, pump_interface: PumpInterface, pressure_sensor: Optional[Any] = None):
         """
         Initialize pump controller.
         
         Args:
             pump_interface: Pump interface instance
+            pressure_sensor: Optional pressure sensor instance (for mock mode simulation)
         """
         self.pump_interface = pump_interface
+        self.pressure_sensor = pressure_sensor
         self.target_pressure_kpa = 0.0
         self.last_adjustment_time = 0.0
         self.is_controlling = False
@@ -36,6 +38,10 @@ class HydraulicPumpController:
         
         # Set initial pressure
         self.pump_interface.set_pressure(target_pressure_kpa)
+        
+        # In mock mode, simulate initial pressure by updating the mock sensor value
+        if USE_MOCK_HARDWARE and self.pressure_sensor:
+            self._update_mock_pressure_sensor(target_pressure_kpa)
 
     def stop_pressure_control(self):
         """Stop pressure control and turn off pump."""
@@ -88,6 +94,11 @@ class HydraulicPumpController:
         self.pump_interface.set_pressure(new_target)
         self.last_adjustment_time = current_time
         
+        # In mock mode, simulate pressure increase by updating the mock sensor value
+        if USE_MOCK_HARDWARE and self.pressure_sensor and pressure_diff > 0:
+            # Only update if pressure needs to increase (pressure_diff > 0)
+            self._update_mock_pressure_sensor(new_target)
+        
         return {
             'status': 'adjusted',
             'current_pressure_kpa': current_pressure_kpa,
@@ -115,6 +126,38 @@ class HydraulicPumpController:
         
         pressure_diff = abs(self.target_pressure_kpa - current_pressure_kpa)
         return pressure_diff <= PUMP_PRESSURE_TOLERANCE_KPA
+
+    def _update_mock_pressure_sensor(self, target_pressure_kpa: float):
+        """
+        Update mock pressure sensor value to simulate pressure increase.
+        Only used in mock mode for simulation.
+        
+        Args:
+            target_pressure_kpa: Target pressure in kPa
+        """
+        if not self.pressure_sensor or not hasattr(self.pressure_sensor, 'adc'):
+            return
+        
+        # Get sensor calibration range
+        min_pressure = getattr(self.pressure_sensor, 'min_pressure_kpa', 0.0)
+        max_pressure = getattr(self.pressure_sensor, 'max_pressure_kpa', 500.0)
+        channel = getattr(self.pressure_sensor, 'channel', None)
+        
+        if channel is None or not hasattr(self.pressure_sensor.adc, 'use_mock'):
+            return
+        
+        # Only update if ADC is in mock mode
+        if not self.pressure_sensor.adc.use_mock:
+            return
+        
+        # Convert target pressure to normalized value (0.0 to 1.0)
+        pressure_range = max_pressure - min_pressure
+        if pressure_range > 0:
+            normalized_value = (target_pressure_kpa - min_pressure) / pressure_range
+            normalized_value = max(0.0, min(1.0, normalized_value))  # Clamp to 0-1
+            
+            # Update the mock ADC value
+            self.pressure_sensor.adc.set_mock_value(channel, normalized_value)
 
     def get_status(self) -> Dict[str, any]:
         """

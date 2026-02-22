@@ -48,23 +48,71 @@ class HybridEngine:
         fuzzy_vote = 1.0 if fuzzy_decision['should_irrigate'] else 0.0
         
         weighted_vote = (rule_vote * self.rule_weight) + (fuzzy_vote * self.fuzzy_weight)
-        should_irrigate = weighted_vote >= 0.5
+        # Convert to Python bool for JSON serialization
+        should_irrigate = bool(weighted_vote >= 0.5)
         
         # Calculate combined confidence
-        rule_confidence = rule_decision.get('confidence', 0.5)
-        fuzzy_confidence = fuzzy_decision.get('confidence', 0.5)
-        combined_confidence = (rule_confidence * self.rule_weight) + (fuzzy_confidence * self.fuzzy_weight)
+        rule_confidence = float(rule_decision.get('confidence', 0.5))
+        fuzzy_confidence = float(fuzzy_decision.get('confidence', 0.5))
+        combined_confidence = float((rule_confidence * self.rule_weight) + (fuzzy_confidence * self.fuzzy_weight))
         
-        # Combine reasons
+        # Create user-friendly message
+        # Prioritize rule-based reason as it's more straightforward
+        user_message = rule_decision.get('user_message', rule_decision.get('reason', ''))
+        
+        # If no user message in rule decision, create one from the main reason
+        if not user_message:
+            if not should_irrigate:
+                # Extract main reason from rule decision
+                rule_reason = rule_decision.get('reason', '')
+                if 'adequate' in rule_reason.lower():
+                    # Extract moisture percentage
+                    import re
+                    moisture_match = re.search(r'(\d+\.?\d*)%', rule_reason)
+                    if moisture_match:
+                        moisture = moisture_match.group(1)
+                        user_message = f'Irrigation skipped: Soil moisture is adequate ({moisture}%)'
+                    else:
+                        user_message = 'Irrigation skipped: Soil moisture is adequate'
+                elif 'weather' in rule_reason.lower():
+                    # Extract weather condition
+                    weather_match = re.search(r'weather.*?is\s+(\w+)', rule_reason.lower())
+                    if weather_match:
+                        weather = weather_match.group(1).capitalize()
+                        user_message = f'Irrigation skipped: Weather is {weather.lower()}'
+                    else:
+                        user_message = 'Irrigation skipped: Weather conditions are not suitable'
+                else:
+                    user_message = rule_reason
+        
+        # Technical reason for logging/debugging
         reason = f"Hybrid decision: Rule-based ({rule_decision['reason']}) + Fuzzy ({fuzzy_decision['reason']})"
+        
+        # Convert nested dictionaries to ensure all values are JSON-serializable
+        def make_json_serializable(obj):
+            """Recursively convert numpy types and other non-JSON types to Python types."""
+            import numpy as np
+            if isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+            elif isinstance(obj, dict):
+                return {key: make_json_serializable(value) for key, value in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [make_json_serializable(item) for item in obj]
+            else:
+                return obj
         
         return {
             'should_irrigate': should_irrigate,
             'reason': reason,
+            'user_message': user_message,
             'confidence': combined_confidence,
-            'rule_decision': rule_decision,
-            'fuzzy_decision': fuzzy_decision,
-            'weighted_vote': weighted_vote
+            'rule_decision': make_json_serializable(rule_decision),
+            'fuzzy_decision': make_json_serializable(fuzzy_decision),
+            'weighted_vote': float(weighted_vote)
         }
 
     def should_fertigate(self, schedule_triggered: bool = True) -> Dict[str, Any]:

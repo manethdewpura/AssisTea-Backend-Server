@@ -1,6 +1,7 @@
 """Database configuration and initialization."""
 import os
-from sqlalchemy import create_engine
+import logging
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -22,14 +23,34 @@ SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bi
 Base = declarative_base()
 
 
+def migrate_db():
+    """Run database migrations to add missing columns."""
+    inspector = inspect(engine)
+    
+    # Check if zone_configs table exists
+    if 'zone_configs' in inspector.get_table_names():
+        # Get existing columns
+        columns = [col['name'] for col in inspector.get_columns('zone_configs')]
+        
+        # Add soil_moisture_sensor_channel if it doesn't exist
+        if 'soil_moisture_sensor_channel' not in columns:
+            logging.info("Adding missing column: soil_moisture_sensor_channel to zone_configs table")
+            with engine.connect() as conn:
+                conn.execute(text('ALTER TABLE zone_configs ADD COLUMN soil_moisture_sensor_channel INTEGER'))
+                conn.commit()
+            logging.info("✓ Migration completed: soil_moisture_sensor_channel column added")
+
+
 def init_db():
     """Initialize database by creating all tables."""
     from app.models import (
         SensorLog, OperationalLog, SystemLog,
         IrrigationSchedule, FertigationSchedule,
-        ZoneConfig, SystemConfig
+        ZoneConfig, SystemConfig, SolenoidStatus
     )
     Base.metadata.create_all(bind=engine)
+    # Run migrations after creating tables
+    migrate_db()
 
 
 def get_db():
