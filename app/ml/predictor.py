@@ -1,6 +1,6 @@
 """
 ML Weather Prediction Service
-Uses 1D CNN model (TensorFlow Lite) to predict weather when API is unavailable.
+Uses 1D CNN model to predict weather when API is unavailable.
 Uses full TensorFlow package for both development and Raspberry Pi deployment.
 """
 
