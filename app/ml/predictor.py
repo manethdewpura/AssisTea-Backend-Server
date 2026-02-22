@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 # Use full TensorFlow package (both development and Raspberry Pi deployment)
 try:
     from tensorflow import lite as tflite
-    TFLITE_RUNTIME_AVAILABLE = True
+    TENSORFLOW_AVAILABLE = True
     logger.info("Using tensorflow.lite")
 except ImportError:
-    TFLITE_RUNTIME_AVAILABLE = False
-    logger.warning("TensorFlow not available. ML predictions will not work. "
+    TENSORFLOW_AVAILABLE = False
+    logger.warning("TensorFlow package not available. ML predictions will not work. "
                   "Install with: pip install tensorflow")
 
 
@@ -45,8 +45,8 @@ class WeatherMLPredictor:
         self.lookback_hours = 48
         self.prediction_intervals = [3, 6, 9, 12, 15, 18, 21, 24]
         
-        if not TFLITE_RUNTIME_AVAILABLE:
-            raise ImportError("TensorFlow not available. Install with: pip install tensorflow")
+        if not TENSORFLOW_AVAILABLE:
+            raise ImportError("TensorFlow package not available. Install with: pip install tensorflow")
         
         self._load_model()
         self._load_metadata()
