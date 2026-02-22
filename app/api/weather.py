@@ -1299,20 +1299,18 @@ def auto_predict_if_stale():
 def get_latest_predictions():
     """
     Get the latest ML-predicted weather data with confidence scores.
-    Used by mobile app when internet is unavailable but backend is reachable on LAN.
-    Returns predictions from the last 24 hours, sorted by confidence (high to low).
+    Returns predictions from the last 24 hours, sorted by time proximity.
     """
     try:
         # Get predictions from the last 24 hours
         current_time = datetime.utcnow()
         cutoff_timestamp = int((current_time - timedelta(hours=24)).timestamp() * 1000)
         
-        # Query ML-generated records from weather_current
+        # Query ML-generated records from weather_current, sorted by time (newest first)
         ml_predictions = WeatherCurrent.query.filter(
             WeatherCurrent.is_ml_generated == True,
             WeatherCurrent.measured_at >= cutoff_timestamp
         ).order_by(
-            WeatherCurrent.confidence_score.desc(),
             WeatherCurrent.measured_at.desc()
         ).all()
         
@@ -1327,6 +1325,7 @@ def get_latest_predictions():
         predictions = []
         for pred in ml_predictions:
             # Build a CurrentWeather-compatible structure
+            
             prediction_data = {
                 'coord': {'lon': pred.coord_lon, 'lat': pred.coord_lat},
                 'weather': [{
@@ -1351,7 +1350,7 @@ def get_latest_predictions():
                     'gust': pred.wind_gust
                 },
                 'clouds': {'all': pred.clouds_all or 0},
-                'dt': int(pred.measured_at / 1000) if pred.measured_at else int(pred.timestamp / 1000),
+                'dt': int(pred.measured_at / 1000) if pred.measured_at is not None else int(pred.timestamp / 1000),
                 'sys': {
                     'type': 0,
                     'country': pred.country or 'LK',
@@ -1386,9 +1385,9 @@ def get_latest_predictions():
             'success': True,
             'message': f'Found {len(predictions)} ML predictions',
             'current': closest_prediction['data'],
-            'best_confidence': closest_prediction['confidence_score'],
-            'predictions': [closest_prediction] + future_predictions,
-            'prediction_count': 1 + len(future_predictions)
+            'current_confidence': closest_prediction['confidence_score'],
+            'predictions': future_predictions,
+            'prediction_count': len(future_predictions)
         }), 200
         
     except Exception as e:
