@@ -1,7 +1,7 @@
 """
 ML Weather Prediction Service
-Uses 1D CNN model (TFLite) to predict weather when API is unavailable.
-Optimized for Raspberry Pi deployment.
+Uses 1D CNN model to predict weather when API is unavailable.
+Uses full TensorFlow package for both development and Raspberry Pi deployment.
 """
 
 import os
@@ -13,22 +13,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Try to import tflite_runtime (Raspberry Pi optimized)
-# Fallback to tensorflow.lite if tflite_runtime not available
+# Use full TensorFlow package (both development and Raspberry Pi deployment)
 try:
-    import tflite_runtime.interpreter as tflite
-    TFLITE_RUNTIME_AVAILABLE = True
-    logger.info("Using tflite_runtime (Raspberry Pi optimized)")
+    from tensorflow import lite as tflite
+    TENSORFLOW_AVAILABLE = True
+    logger.info("Using tensorflow.lite")
 except ImportError:
-    try:
-        from tensorflow import lite as tflite
-        TFLITE_RUNTIME_AVAILABLE = True
-        logger.info("Using tensorflow.lite (development mode)")
-    except ImportError:
-        TFLITE_RUNTIME_AVAILABLE = False
-        logger.warning("TFLite runtime not available. ML predictions will not work. "
-                      "Install with: pip install tflite-runtime (Raspberry Pi) or "
-                      "pip install tensorflow (Windows/Mac development)")
+    TENSORFLOW_AVAILABLE = False
+    logger.warning("TensorFlow package not available. ML predictions will not work. "
+                  "Install with: pip install tensorflow")
 
 
 class WeatherMLPredictor:
@@ -52,8 +45,8 @@ class WeatherMLPredictor:
         self.lookback_hours = 48
         self.prediction_intervals = [3, 6, 9, 12, 15, 18, 21, 24]
         
-        if not TFLITE_RUNTIME_AVAILABLE:
-            raise ImportError("TFLite runtime not available. Install with: pip install tflite-runtime")
+        if not TENSORFLOW_AVAILABLE:
+            raise ImportError("TensorFlow package not available. Install with: pip install tensorflow")
         
         self._load_model()
         self._load_metadata()

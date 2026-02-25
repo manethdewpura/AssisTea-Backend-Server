@@ -129,12 +129,14 @@ def sync_current_weather():
         # Clean up old records (keep last 10 days for efficiency)
         # This prevents database from growing indefinitely
         cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
-        if location_id:
-            WeatherCurrent.query.filter_by(location_id=location_id).filter(
-                WeatherCurrent.timestamp < cutoff_time
-            ).delete()
-        else:
-            WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete()
+        # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+        with db.session.no_autoflush:
+            if location_id:
+                WeatherCurrent.query.filter_by(location_id=location_id).filter(
+                    WeatherCurrent.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
+            else:
+                WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete(synchronize_session=False)
         
         # Create new current weather record 
         try:
@@ -326,6 +328,21 @@ def sync_weather_forecast():
                 db.session.add(forecast_record)
                 records_created += 1
         
+        # Clean up old records (keep last 10 days for efficiency)
+        # This prevents database from growing indefinitely
+        cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
+        # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+        with db.session.no_autoflush:
+            if city_id is not None:
+                WeatherForecast.query.filter_by(city_id=city_id).filter(
+                    WeatherForecast.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
+            elif city_id is None:
+                WeatherForecast.query.filter(
+                    WeatherForecast.city_id.is_(None),
+                    WeatherForecast.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
+        
         try:
             db.session.commit()
         except IntegrityError:
@@ -457,12 +474,14 @@ def sync_all_weather_data():
                 else:
                     # Clean up old records (keep last 10 days for efficiency)
                     cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
-                    if location_id:
-                        WeatherCurrent.query.filter_by(location_id=location_id).filter(
-                            WeatherCurrent.timestamp < cutoff_time
-                        ).delete()
-                    else:
-                        WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete()
+                    # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+                    with db.session.no_autoflush:
+                        if location_id:
+                            WeatherCurrent.query.filter_by(location_id=location_id).filter(
+                                WeatherCurrent.timestamp < cutoff_time
+                            ).delete(synchronize_session=False)
+                        else:
+                            WeatherCurrent.query.filter(WeatherCurrent.timestamp < cutoff_time).delete(synchronize_session=False)
                     
                     try:
                         weather_record = WeatherCurrent(
@@ -623,6 +642,21 @@ def sync_all_weather_data():
                     
                     db.session.add(forecast_record)
                     forecast_created += 1
+            
+            # Clean up old forecast records (keep last 10 days for efficiency)
+            # This prevents database from growing indefinitely
+            cutoff_time = int((datetime.utcnow() - timedelta(days=10)).timestamp() * 1000)
+            # Avoid autoflush during delete to prevent IntegrityError from pending inserts/updates
+            with db.session.no_autoflush:
+                if city_id is not None:
+                    WeatherForecast.query.filter_by(city_id=city_id).filter(
+                        WeatherForecast.timestamp < cutoff_time
+                    ).delete(synchronize_session=False)
+                elif city_id is None:
+                    WeatherForecast.query.filter(
+                        WeatherForecast.city_id.is_(None),
+                        WeatherForecast.timestamp < cutoff_time
+                    ).delete(synchronize_session=False)
             
             results['forecast'] = {
                 'created': forecast_created,
@@ -1260,3 +1294,105 @@ def auto_predict_if_stale():
             'message': f'Error: {str(e)}'
         }), 500
 
+
+@weather_bp.route('/predictions/latest', methods=['GET'])
+def get_latest_predictions():
+    """
+    Get the latest ML-predicted weather data with confidence scores.
+    Returns predictions from the last 24 hours, sorted by time proximity.
+    """
+    try:
+        # Get predictions from the last 24 hours
+        current_time = datetime.utcnow()
+        cutoff_timestamp = int((current_time - timedelta(hours=24)).timestamp() * 1000)
+        
+        # Query ML-generated records from weather_current, sorted by time (newest first)
+        ml_predictions = WeatherCurrent.query.filter(
+            WeatherCurrent.is_ml_generated == True,
+            WeatherCurrent.measured_at >= cutoff_timestamp
+        ).order_by(
+            WeatherCurrent.measured_at.desc()
+        ).all()
+        
+        if not ml_predictions:
+            return jsonify({
+                'success': False,
+                'message': 'No ML predictions available',
+                'predictions': []
+            }), 404
+        
+        # Format predictions as CurrentWeather-compatible objects with metadata
+        predictions = []
+        for pred in ml_predictions:
+            # Build a CurrentWeather-compatible structure
+            
+            prediction_data = {
+                'coord': {'lon': pred.coord_lon, 'lat': pred.coord_lat},
+                'weather': [{
+                    'id': 800,
+                    'main': pred.weather_main or 'Clear',
+                    'description': pred.weather_description or 'clear sky',
+                    'icon': pred.weather_icon or '01d'
+                }],
+                'base': 'ml_prediction',
+                'main': {
+                    'temp': pred.temp,
+                    'feels_like': pred.feels_like,
+                    'temp_min': pred.temp_min,
+                    'temp_max': pred.temp_max,
+                    'pressure': pred.pressure,
+                    'humidity': pred.humidity
+                },
+                'visibility': pred.visibility or 10000,
+                'wind': {
+                    'speed': pred.wind_speed,
+                    'deg': pred.wind_deg,
+                    'gust': pred.wind_gust
+                },
+                'clouds': {'all': pred.clouds_all or 0},
+                'dt': int(pred.measured_at / 1000) if pred.measured_at is not None else int(pred.timestamp / 1000),
+                'sys': {
+                    'type': 0,
+                    'country': pred.country or 'LK',
+                    'sunrise': 0,
+                    'sunset': 0
+                },
+                'timezone': pred.timezone or 19800,  # Default to LK timezone offset (5:30 = 19800s)
+                'id': pred.location_id or 0,
+                'name': pred.location_name or 'Unknown',
+                'cod': 200
+            }
+            
+            predictions.append({
+                'data': prediction_data,
+                'confidence_score': pred.confidence_score or 0.0,
+                'data_source': pred.data_source or 'ml_prediction',
+                'measured_at': pred.measured_at,
+                'predicted_at': pred.timestamp
+            })
+        
+        # Find the prediction closest to current time for the main display
+        current_time_ms = int(current_time.timestamp() * 1000)
+        closest_prediction = min(predictions, key=lambda p: abs(p['measured_at'] - current_time_ms))
+        
+        # Next 5 future predictions after the closest one, sorted chronologically
+        future_predictions = sorted(
+            [p for p in predictions if p['measured_at'] > closest_prediction['measured_at']],
+            key=lambda p: p['measured_at']
+        )[:5]
+        
+        return jsonify({
+            'success': True,
+            'message': f'Found {len(predictions)} ML predictions',
+            'current': closest_prediction['data'],
+            'current_confidence': closest_prediction['confidence_score'],
+            'predictions': future_predictions,
+            'prediction_count': len(future_predictions)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fetching ML predictions: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': f'Error fetching predictions: {str(e)}'
+        }), 500
