@@ -90,10 +90,6 @@ MINOR_LOSS_COEFFICIENT_K = float(os.getenv('MINOR_LOSS_COEFFICIENT_K', '5.0'))
 # Configurable safety margin applied on top of the calculated required pressure.
 PRESSURE_SAFETY_MARGIN_PERCENT = float(os.getenv('PRESSURE_SAFETY_MARGIN_PERCENT', '10.0'))
 
-# (Legacy) simple slope loss model – kept for backward compatibility but
-# not used in the new Darcy–Weisbach based calculation.
-PRESSURE_LOSS_PER_DEGREE_SLOPE_KPA = float(os.getenv('PRESSURE_LOSS_PER_DEGREE_SLOPE_KPA', '2.5'))
-
 # Pump control
 PUMP_PRESSURE_TOLERANCE_KPA = float(os.getenv('PUMP_PRESSURE_TOLERANCE_KPA', '10.0'))
 PUMP_ADJUSTMENT_INTERVAL_SEC = float(os.getenv('PUMP_ADJUSTMENT_INTERVAL_SEC', '2.0'))

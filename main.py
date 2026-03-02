@@ -150,7 +150,7 @@ from app.hydraulics.pressure_calculator import PressureCalculator
 from app.hydraulics.valve_controller import HydraulicValveController
 from app.hydraulics.pump_controller import HydraulicPumpController
 
-pressure_calculator = PressureCalculator(reference_altitude_m=0.0)
+pressure_calculator = PressureCalculator()
 valve_controller = HydraulicValveController(valve_controller_hw)
 irrigation_pump_controller = HydraulicPumpController(irrigation_pump_controller_hw, pressure_sensor=irrigation_pressure_sensor)
 fertilizer_pump_controller = HydraulicPumpController(fertilizer_pump_controller_hw, pressure_sensor=fertilizer_pressure_sensor)

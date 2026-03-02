@@ -29,7 +29,6 @@ class PressureCalculator:
 
     def __init__(
         self,
-        reference_altitude_m: float = 0.0,
         pipe_length_m: float = PIPE_LENGTH_M,
         pipe_diameter_m: float = PIPE_DIAMETER_M,
         flow_rate_m3_per_s: float = ESTIMATED_FLOW_RATE_M3_PER_S,
@@ -41,8 +40,6 @@ class PressureCalculator:
         Initialize pressure calculator.
 
         Args:
-            reference_altitude_m: Kept for backwards compatibility (absolute altitude);
-                                  static head for irrigation is derived from pipe geometry.
             pipe_length_m: Total pipe length L in meters.
             pipe_diameter_m: Internal pipe diameter D in meters.
             flow_rate_m3_per_s: Estimated volumetric flow rate Q in m³/s.
@@ -51,7 +48,6 @@ class PressureCalculator:
             minor_loss_coefficient_k: Aggregate minor loss coefficient K (dimensionless).
             safety_margin_percent: Safety margin percentage applied to the total pressure.
         """
-        self.reference_altitude_m = reference_altitude_m
         self.pipe_length_m = pipe_length_m
         self.pipe_diameter_m = pipe_diameter_m
         self.flow_rate_m3_per_s = flow_rate_m3_per_s
@@ -211,8 +207,4 @@ class PressureCalculator:
             'min_pressure_kpa': max(0.0, required_pressure_kpa - tolerance_kpa),
             'max_pressure_kpa': required_pressure_kpa + tolerance_kpa,
         }
-
-    def update_reference_altitude(self, reference_altitude_m: float):
-        """Update reference altitude (retained for API compatibility)."""
-        self.reference_altitude_m = reference_altitude_m
 
