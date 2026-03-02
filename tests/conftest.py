@@ -216,10 +216,6 @@ def app(irrigation_controller, fertigation_controller):
     from app.api import irrigation, fertigation
     irrigation.controllers = {
         'irrigation': irrigation_controller,
-        'zone_configs': {
-            1: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0},
-            2: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
-        }
     }
     fertigation.controllers = {
         'fertigation': fertigation_controller

@@ -1,9 +1,9 @@
 """Irrigation API endpoints."""
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
-from app.config.config import (
-    ZONE_ID, ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA
-)
+from app.config.config import ZONE_ID
+from app.config.database import get_db
+from app.utils.system_config_helper import load_system_config
 
 irrigation_bp = Blueprint('irrigation', __name__)
 api_bp.register_blueprint(irrigation_bp, url_prefix='/irrigation')
@@ -16,18 +16,45 @@ controllers = {}
 def start_irrigation():
     """Start irrigation for the system zone."""
     try:
+        data = request.get_json() or {}
+        if not isinstance(data, dict):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid JSON payload',
+                'message': 'Request body must be a JSON object'
+            }), 400
+
         irrigation_ctrl = controllers.get('irrigation')
         if not irrigation_ctrl:
             return jsonify({
                 'success': False,
                 'error': 'Irrigation controller not initialized'
             }), 500
+
+        # Validate requested zone (single-zone system)
+        if 'zone_id' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: zone_id'
+            }), 400
+
+        requested_zone_id = data.get('zone_id')
+        if requested_zone_id != ZONE_ID:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid zone_id {requested_zone_id}; only zone_id={ZONE_ID} is supported'
+            }), 404
         
-        # Build zone_config dictionary from hardcoded config values
+        # Load hydraulic / zone config from database-backed SystemConfig
+        db = next(get_db())
+        try:
+            cfg = load_system_config(db)
+        finally:
+            db.close()
+
         zone_config = {
-            'altitude': ZONE_ALTITUDE_M,
-            'slope': ZONE_SLOPE_DEGREES,
-            'base_pressure': ZONE_BASE_PRESSURE_KPA
+            'slope': cfg.get('zone_slope_degrees'),
+            'base_pressure': cfg.get('zone_base_pressure_kpa'),
         }
         
         result = irrigation_ctrl.start_irrigation(ZONE_ID, zone_config)

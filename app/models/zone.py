@@ -9,7 +9,6 @@ class ZoneConfig(Base):
 
     zone_id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)  # Zone name/description
-    altitude = Column(Float, nullable=False)  # Altitude in meters above sea level
     slope = Column(Float, nullable=False)  # Slope angle in degrees
     area = Column(Float, nullable=False)  # Area in square meters
     base_pressure = Column(Float, nullable=False)  # Base pressure requirement in kPa
@@ -24,5 +23,5 @@ class ZoneConfig(Base):
     # - Fertilizer pump pressure: ADS1115 channel 3 (A3)
 
     def __repr__(self):
-        return f"<ZoneConfig(zone_id={self.zone_id}, name={self.name}, altitude={self.altitude}m, slope={self.slope}°)>"
+        return f"<ZoneConfig(zone_id={self.zone_id}, name={self.name}, slope={self.slope}°, area={self.area}m²)>"
 
