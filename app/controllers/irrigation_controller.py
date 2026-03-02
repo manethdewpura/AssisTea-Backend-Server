@@ -14,6 +14,7 @@ from app.config.config import (
     ADEQUATE_SOIL_MOISTURE_PERCENT, MOISTURE_CHECK_INTERVAL_SEC,
     MAX_OPERATION_DURATION_SEC
 )
+from app.utils.system_config_helper import load_system_config
 from app.models.operational_log import OperationalLog, OperationType, OperationStatus
 from app.models.system_log import SystemLog, LogLevel
 
@@ -191,9 +192,29 @@ class IrrigationController:
                               start_moisture=start_moisture,
                               weather_info=weather_data)
             
-            # Calculate required pressure
+            # Refresh hydraulic geometry from the latest system configuration
+            # so that runtime config changes (pipe length / diameter / flow rate)
+            # are reflected without restarting the process.
+            try:
+                db = next(self.db_session_factory())
+                try:
+                    sys_cfg = load_system_config(db)
+                finally:
+                    db.close()
+            except Exception:
+                sys_cfg = {}
+
+            pipe_length_m = sys_cfg.get('pipe_length_m', self.pressure_calculator.pipe_length_m)
+            pipe_diameter_m = sys_cfg.get('pipe_diameter_m', self.pressure_calculator.pipe_diameter_m)
+            flow_rate_m3_per_s = sys_cfg.get('estimated_flow_rate_m3_per_s', self.pressure_calculator.flow_rate_m3_per_s)
+
+            # Update calculator instance in-place with current geometry
+            self.pressure_calculator.pipe_length_m = pipe_length_m
+            self.pressure_calculator.pipe_diameter_m = pipe_diameter_m
+            self.pressure_calculator.flow_rate_m3_per_s = flow_rate_m3_per_s
+
+            # Calculate required pressure using up-to-date geometry and zone config
             pressure_calc = self.pressure_calculator.calculate_required_pressure(
-                zone_config['altitude'],
                 zone_config['slope'],
                 zone_config['base_pressure']
             )

@@ -1,10 +1,13 @@
-"""System control API endpoints."""
+"""System control and configuration API endpoints."""
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
 from app.config.config import (
-    ZONE_ID, ZONE_VALVE_GPIO_PIN, ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
-    ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_AREA_M2, ZONE_BASE_PRESSURE_KPA
+    ZONE_ID,
+    ZONE_VALVE_GPIO_PIN,
+    ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
 )
+from app.config.database import get_db
+from app.utils.system_config_helper import load_system_config, update_system_config
 
 system_bp = Blueprint('system', __name__)
 api_bp.register_blueprint(system_bp, url_prefix='/system')
@@ -97,20 +100,111 @@ def get_system_status():
 def get_zone_info():
     """Get zone configuration information (read-only)."""
     try:
+        db = next(get_db())
+        try:
+            cfg = load_system_config(db)
+        finally:
+            db.close()
+
         zone_info = {
             'zone_id': ZONE_ID,
             'valve_gpio_pin': ZONE_VALVE_GPIO_PIN,
             'soil_moisture_sensor_channel': ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
-            'altitude': ZONE_ALTITUDE_M,
-            'slope': ZONE_SLOPE_DEGREES,
-            'area': ZONE_AREA_M2,
-            'base_pressure': ZONE_BASE_PRESSURE_KPA
+            'slope': cfg.get('zone_slope_degrees'),
+            'area': cfg.get('zone_area_m2'),
+            'base_pressure': cfg.get('zone_base_pressure_kpa'),
         }
         
         return jsonify({
             'success': True,
             'zone': zone_info
         }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@system_bp.route('/config', methods=['GET'])
+def get_system_config():
+    """Get system-wide hydraulic and zone configuration (single-zone system)."""
+    try:
+        db = next(get_db())
+        try:
+            cfg = load_system_config(db)
+        finally:
+            db.close()
+
+        return jsonify({
+            'success': True,
+            'config': cfg
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@system_bp.route('/config', methods=['PUT', 'PATCH'])
+def update_system_config_route():
+    """
+    Update system-wide hydraulic and zone configuration.
+
+    Accepts a JSON body with any subset of:
+      - zone_slope_degrees
+      - zone_area_m2
+      - zone_base_pressure_kpa
+      - pipe_length_m
+      - pipe_diameter_m
+      - estimated_flow_rate_m3_per_s
+    """
+    try:
+        data = request.get_json() or {}
+        if not isinstance(data, dict):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid JSON payload'
+            }), 400
+
+        db = next(get_db())
+        try:
+            update_result = update_system_config(db, data)
+        finally:
+            db.close()
+
+        cfg = update_result.get('config', {})
+        applied_keys = update_result.get('applied_keys', [])
+        unknown_keys = update_result.get('unknown_keys', [])
+        invalid_values = update_result.get('invalid_values', {})
+
+        # If nothing was successfully applied, treat this as a bad request so
+        # clients can detect rejected updates.
+        if not applied_keys:
+            return jsonify({
+                'success': False,
+                'error': 'No configuration values were updated',
+                'details': {
+                    'unknown_keys': unknown_keys,
+                    'invalid_values': invalid_values,
+                },
+            }), 400
+
+        response_body = {
+            'success': True,
+            'config': cfg,
+            'applied_keys': applied_keys,
+        }
+
+        # Surface partial failures as warnings while still returning success.
+        if unknown_keys or invalid_values:
+            response_body['warnings'] = {
+                'unknown_keys': unknown_keys,
+                'invalid_values': invalid_values,
+            }
+
+        return jsonify(response_body), 200
     except Exception as e:
         return jsonify({
             'success': False,
