@@ -66,9 +66,32 @@ MAX_PRESSURE_KPA = float(os.getenv('MAX_PRESSURE_KPA', '500.0'))
 TANK_EMPTY_LEVEL_CM = float(os.getenv('TANK_EMPTY_LEVEL_CM', '5.0'))
 TANK_FULL_LEVEL_CM = float(os.getenv('TANK_FULL_LEVEL_CM', '50.0'))
 
-# Hydraulic constants
-WATER_DENSITY_KG_PER_M3 = 1000.0
-GRAVITY_M_PER_S2 = 9.81
+# Hydraulic constants (for realistic pressure calculations)
+WATER_DENSITY_KG_PER_M3 = 1000.0  # kg/m³ (fresh water at ~20°C)
+GRAVITY_M_PER_S2 = 9.81  # m/s²
+
+# Dynamic viscosity of water (for Reynolds number / Darcy friction factor)
+# μ ≈ 1.0e-3 Pa·s at ~20°C
+WATER_DYNAMIC_VISCOSITY_PA_S = float(os.getenv('WATER_DYNAMIC_VISCOSITY_PA_S', '0.001'))
+
+# Pipe / hydraulic geometry for main irrigation line
+# These are engineering estimates and should be tuned per installation.
+PIPE_LENGTH_M = float(os.getenv('PIPE_LENGTH_M', '50.0'))  # Total pipe run [m]
+PIPE_DIAMETER_M = float(os.getenv('PIPE_DIAMETER_M', '0.050'))  # Internal diameter [m] (e.g. 50 mm)
+ESTIMATED_FLOW_RATE_M3_PER_S = float(os.getenv('ESTIMATED_FLOW_RATE_M3_PER_S', '0.001'))  # m³/s
+
+# Darcy–Weisbach friction factor.
+# If <= 0, the system will estimate f from Reynolds number (laminar / turbulent).
+DARCY_FRICTION_FACTOR = float(os.getenv('DARCY_FRICTION_FACTOR', '0.0'))
+
+# Aggregate minor loss coefficient K (dimensionless) for fittings, bends, valves, etc.
+MINOR_LOSS_COEFFICIENT_K = float(os.getenv('MINOR_LOSS_COEFFICIENT_K', '5.0'))
+
+# Configurable safety margin applied on top of the calculated required pressure.
+PRESSURE_SAFETY_MARGIN_PERCENT = float(os.getenv('PRESSURE_SAFETY_MARGIN_PERCENT', '10.0'))
+
+# (Legacy) simple slope loss model – kept for backward compatibility but
+# not used in the new Darcy–Weisbach based calculation.
 PRESSURE_LOSS_PER_DEGREE_SLOPE_KPA = float(os.getenv('PRESSURE_LOSS_PER_DEGREE_SLOPE_KPA', '2.5'))
 
 # Pump control
