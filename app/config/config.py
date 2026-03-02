@@ -49,7 +49,6 @@ ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHA
 # - wet (100%): 1.136V ≈ 0.344 normalized
 ZONE_SOIL_MOISTURE_DRY_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_DRY_VALUE', '0.833'))
 ZONE_SOIL_MOISTURE_WET_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_WET_VALUE', '0.344'))
-ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '680.0'))  # Zone altitude in meters above sea level
 ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '25.0'))  # Zone slope angle in degrees
 ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '1200.0'))  # Zone area in square meters
 ZONE_BASE_PRESSURE_KPA = float(os.getenv('ZONE_BASE_PRESSURE_KPA', '200.0'))  # Base pressure requirement in kPa

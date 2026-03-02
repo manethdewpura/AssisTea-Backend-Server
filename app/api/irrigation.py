@@ -2,7 +2,7 @@
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
 from app.config.config import (
-    ZONE_ID, ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA
+    ZONE_ID, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA
 )
 
 irrigation_bp = Blueprint('irrigation', __name__)
@@ -25,7 +25,6 @@ def start_irrigation():
         
         # Build zone_config dictionary from hardcoded config values
         zone_config = {
-            'altitude': ZONE_ALTITUDE_M,
             'slope': ZONE_SLOPE_DEGREES,
             'base_pressure': ZONE_BASE_PRESSURE_KPA
         }

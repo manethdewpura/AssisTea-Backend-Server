@@ -6,7 +6,7 @@ from typing import Dict, Callable, Optional
 from app.config.database import get_db
 from app.models.schedule import IrrigationSchedule, FertigationSchedule
 from app.config.config import (
-    ZONE_ID, ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA, SCHEDULE_TIMEZONE
+    ZONE_ID, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA, SCHEDULE_TIMEZONE
 )
 
 # Timezone handling
@@ -205,7 +205,6 @@ class TaskScheduler:
         try:
             # Use hardcoded zone config
             zone_config = {
-                'altitude': ZONE_ALTITUDE_M,
                 'slope': ZONE_SLOPE_DEGREES,
                 'base_pressure': ZONE_BASE_PRESSURE_KPA
             }
