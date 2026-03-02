@@ -193,7 +193,6 @@ class IrrigationController:
             
             # Calculate required pressure
             pressure_calc = self.pressure_calculator.calculate_required_pressure(
-                zone_config['altitude'],
                 zone_config['slope'],
                 zone_config['base_pressure']
             )

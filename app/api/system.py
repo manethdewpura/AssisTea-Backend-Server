@@ -170,14 +170,41 @@ def update_system_config_route():
 
         db = next(get_db())
         try:
-            cfg = update_system_config(db, data)
+            update_result = update_system_config(db, data)
         finally:
             db.close()
 
-        return jsonify({
+        cfg = update_result.get('config', {})
+        applied_keys = update_result.get('applied_keys', [])
+        unknown_keys = update_result.get('unknown_keys', [])
+        invalid_values = update_result.get('invalid_values', {})
+
+        # If nothing was successfully applied, treat this as a bad request so
+        # clients can detect rejected updates.
+        if not applied_keys:
+            return jsonify({
+                'success': False,
+                'error': 'No configuration values were updated',
+                'details': {
+                    'unknown_keys': unknown_keys,
+                    'invalid_values': invalid_values,
+                },
+            }), 400
+
+        response_body = {
             'success': True,
-            'config': cfg
-        }), 200
+            'config': cfg,
+            'applied_keys': applied_keys,
+        }
+
+        # Surface partial failures as warnings while still returning success.
+        if unknown_keys or invalid_values:
+            response_body['warnings'] = {
+                'unknown_keys': unknown_keys,
+                'invalid_values': invalid_values,
+            }
+
+        return jsonify(response_body), 200
     except Exception as e:
         return jsonify({
             'success': False,

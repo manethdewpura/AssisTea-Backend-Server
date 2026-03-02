@@ -57,7 +57,6 @@ class PressureCalculator:
 
     def calculate_required_pressure(
         self,
-        zone_altitude_m: float,
         zone_slope_degrees: float,
         base_pressure_kpa: float,
     ) -> Dict[str, float]:
@@ -65,7 +64,6 @@ class PressureCalculator:
         Calculate required pump pressure for a zone.
 
         Args:
-            zone_altitude_m: Zone altitude in meters (kept for logging / future use).
             zone_slope_degrees: Slope angle θ of the pipe in degrees.
             base_pressure_kpa: Base pressure requirement (emitter / sprinkler spec) in kPa.
 
@@ -120,7 +118,6 @@ class PressureCalculator:
         return {
             # Inputs / geometry
             'base_pressure_kpa': base_pressure_kpa,
-            'zone_altitude_m': zone_altitude_m,
             'zone_slope_degrees': zone_slope_degrees,
             'pipe_length_m': self.pipe_length_m,
             'pipe_diameter_m': self.pipe_diameter_m,

@@ -5,7 +5,9 @@ This bridges environment-based defaults from ``app.config.config`` with the
 become user-configurable at runtime via the database.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
+
+from sqlalchemy.exc import IntegrityError
 
 from app.models.system_config import SystemConfig
 from app.config import config as default_config
@@ -65,21 +67,42 @@ def load_system_config(db) -> Dict[str, Any]:
     """
     config_values: Dict[str, Any] = {}
 
-    for name, meta in SYSTEM_CONFIG_SCHEMA.items():
+    # First pass: determine which keys are missing and need seeding.
+    to_seed: List[Tuple[str, Any, str]] = []
+    for meta in SYSTEM_CONFIG_SCHEMA.values():
         db_key = meta["db_key"]
         default_value = meta.get("default")
-        value_type = meta.get("type", float)
         description = meta.get("description")
 
         row = db.query(SystemConfig).filter_by(key=db_key).first()
         if row is None:
-            # Seed with default value so it becomes user-editable via DB/API.
-            row = SystemConfig(key=db_key, value=str(default_value), description=description)
-            db.add(row)
-            db.commit()
+            to_seed.append((db_key, default_value, description))
 
-        # Convert stored text value to the desired type, falling back to default
-        # if conversion fails.
+    # Batch-insert any missing keys and commit once. Handle races where another
+    # process inserts the same key between our check and commit.
+    if to_seed:
+        try:
+            for db_key, default_value, description in to_seed:
+                db.add(SystemConfig(key=db_key, value=str(default_value), description=description))
+            db.commit()
+        except IntegrityError:
+            # Another process may have inserted some/all keys; rollback and
+            # re-read below without assuming our inserts succeeded.
+            db.rollback()
+
+    # Second pass: build the typed config dict from whatever is now in the DB,
+    # falling back to defaults if conversion fails or a row is still absent.
+    for name, meta in SYSTEM_CONFIG_SCHEMA.items():
+        db_key = meta["db_key"]
+        default_value = meta.get("default")
+        value_type = meta.get("type", float)
+
+        row = db.query(SystemConfig).filter_by(key=db_key).first()
+        if row is None:
+            # As a last resort, use the default directly without seeding again.
+            config_values[name] = default_value
+            continue
+
         try:
             typed_value = value_type(row.value)
         except (TypeError, ValueError):
@@ -94,27 +117,46 @@ def update_system_config(db, updates: Dict[str, Any]) -> Dict[str, Any]:
     """Apply partial updates to the system configuration.
 
     ``updates`` should use the public field names from SYSTEM_CONFIG_SCHEMA
-    (e.g., ``zone_slope_degrees``, ``pipe_length_m``). Unknown keys are ignored.
-    Values are stored as text in ``SystemConfig`` and returned as typed values.
+    (e.g., ``zone_slope_degrees``, ``pipe_length_m``).
+
+    Returns a structured result:
+      - ``config``: full typed configuration after applying updates
+      - ``applied_keys``: list of field names that were successfully updated
+      - ``unknown_keys``: list of field names that are not in SYSTEM_CONFIG_SCHEMA
+      - ``invalid_values``: mapping of field name -> raw value that failed validation/casting
     """
+    result: Dict[str, Any] = {
+        "config": None,
+        "applied_keys": [],       # type: List[str]
+        "unknown_keys": [],       # type: List[str]
+        "invalid_values": {},     # type: Dict[str, Any]
+    }
+
     if not updates:
         # Nothing to change; just return current config.
-        return load_system_config(db)
+        result["config"] = load_system_config(db)
+        return result
+
+    applied_keys: List[str] = []
+    unknown_keys: List[str] = []
+    invalid_values: Dict[str, Any] = {}
 
     for name, raw_value in updates.items():
         meta = SYSTEM_CONFIG_SCHEMA.get(name)
         if not meta:
-            # Ignore unknown keys to keep API forwards-compatible.
+            # Track unknown keys so the API layer can report them to clients.
+            unknown_keys.append(name)
             continue
 
         db_key = meta["db_key"]
         value_type = meta.get("type", float)
         description = meta.get("description")
 
-        # Best-effort cast; if cast fails we keep the previous value.
+        # Best-effort cast; if cast fails we keep the previous value and report the error.
         try:
             cast_value = value_type(raw_value)
         except (TypeError, ValueError):
+            invalid_values[name] = raw_value
             continue
 
         row = db.query(SystemConfig).filter_by(key=db_key).first()
@@ -124,6 +166,13 @@ def update_system_config(db, updates: Dict[str, Any]) -> Dict[str, Any]:
         else:
             row.value = str(cast_value)
 
+        applied_keys.append(name)
+
     db.commit()
-    return load_system_config(db)
+
+    result["config"] = load_system_config(db)
+    result["applied_keys"] = applied_keys
+    result["unknown_keys"] = unknown_keys
+    result["invalid_values"] = invalid_values
+    return result
 

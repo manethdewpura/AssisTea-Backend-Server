@@ -17,6 +17,12 @@ def start_irrigation():
     """Start irrigation for the system zone."""
     try:
         data = request.get_json() or {}
+        if not isinstance(data, dict):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid JSON payload',
+                'message': 'Request body must be a JSON object'
+            }), 400
 
         irrigation_ctrl = controllers.get('irrigation')
         if not irrigation_ctrl:
@@ -26,7 +32,13 @@ def start_irrigation():
             }), 500
 
         # Validate requested zone (single-zone system)
-        requested_zone_id = data.get('zone_id', ZONE_ID)
+        if 'zone_id' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: zone_id'
+            }), 400
+
+        requested_zone_id = data.get('zone_id')
         if requested_zone_id != ZONE_ID:
             return jsonify({
                 'success': False,

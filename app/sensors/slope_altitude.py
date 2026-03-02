@@ -10,8 +10,8 @@ from app.utils.noise_filter import NoiseFilter
 from app.utils.unit_converter import UnitConverter
 
 
-class SlopeAltitudeSensor(BaseSensor):
-    """Sensor for slope readings (altitude removed)."""
+class SlopeSensor(BaseSensor):
+    """Sensor for slope readings in degrees."""
 
     def __init__(self, sensor_id: str, zone_id: Optional[int] = None,
                  slope_degrees: float = 0.0):
