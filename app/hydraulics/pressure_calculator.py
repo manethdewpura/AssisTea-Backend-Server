@@ -136,8 +136,8 @@ class PressureCalculator:
             'safety_margin_kpa': safety_margin_kpa,
             # Totals
             'total_required_pressure_kpa': total_pressure_kpa,
-            # For compatibility: report the vertical height used for static head
-            'altitude_difference_m': height_m,
+            # Vertical height used for static head
+            'height_m': height_m,
         }
 
     def _calculate_static_head_pressure(self, height_m: float) -> float:

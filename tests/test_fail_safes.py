@@ -224,7 +224,7 @@ class TestFailSafeIntegration:
             sensor.mark_failure()
         
         # Try to start irrigation - should fail or handle gracefully
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         
         # The sensor should fail when reading
         try:
@@ -248,7 +248,7 @@ class TestFailSafeIntegration:
         # Set normal moisture
         mock_adc.set_mock_value(1, 0.686)
         
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         
         # Irrigation should check emergency stop (if integrated)
         # For now, we verify emergency stop works
@@ -376,7 +376,7 @@ class TestFailSafeFailureScenarios:
         original_sensors = irrigation_controller.soil_moisture_sensors.copy()
         
         # Try to start irrigation for zone without sensor
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         result = irrigation_controller.start_irrigation(999, zone_config)  # Zone without sensor
         
         # Should fail because no sensor for zone
@@ -476,7 +476,7 @@ class TestFailSafeFailureScenarios:
         assert sensor.is_sensor_healthy() is False
         
         # Try to read from failed sensor - should raise exception
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         
         # Attempting to start irrigation with failed sensor should fail
         try:

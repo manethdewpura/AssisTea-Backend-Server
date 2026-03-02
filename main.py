@@ -149,8 +149,21 @@ logging.info(f"✓ Zone valve controller initialized with zone {ZONE_ID} (GPIO p
 from app.hydraulics.pressure_calculator import PressureCalculator
 from app.hydraulics.valve_controller import HydraulicValveController
 from app.hydraulics.pump_controller import HydraulicPumpController
+from app.utils.system_config_helper import load_system_config
 
-pressure_calculator = PressureCalculator()
+# Load or seed system-wide hydraulic configuration from the database.
+db = next(get_db())
+try:
+    sys_cfg = load_system_config(db)
+finally:
+    db.close()
+
+# Initialize pressure calculator using DB-backed pipe geometry and flow rate.
+pressure_calculator = PressureCalculator(
+    pipe_length_m=sys_cfg.get('pipe_length_m'),
+    pipe_diameter_m=sys_cfg.get('pipe_diameter_m'),
+    flow_rate_m3_per_s=sys_cfg.get('estimated_flow_rate_m3_per_s'),
+)
 valve_controller = HydraulicValveController(valve_controller_hw)
 irrigation_pump_controller = HydraulicPumpController(irrigation_pump_controller_hw, pressure_sensor=irrigation_pressure_sensor)
 fertilizer_pump_controller = HydraulicPumpController(fertilizer_pump_controller_hw, pressure_sensor=fertilizer_pressure_sensor)
