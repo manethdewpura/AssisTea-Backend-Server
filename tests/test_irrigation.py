@@ -102,7 +102,7 @@ class TestIrrigationController:
         # Set low moisture
         mock_adc.set_mock_value(1, 0.686)
         
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         result = irrigation_controller.start_irrigation(1, zone_config)
         
         assert result['success'] is True
@@ -115,7 +115,7 @@ class TestIrrigationController:
         # Start with low moisture
         mock_adc.set_mock_value(1, 0.686)  # ~30%
         
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         result = irrigation_controller.start_irrigation(1, zone_config)
         assert result['success'] is True
         
@@ -148,7 +148,7 @@ class TestIrrigationController:
         # Set pressure sensor value
         mock_adc.set_mock_value(0, 0.5)  # Channel 0 for pressure (~250 kPa)
         
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         result = irrigation_controller.start_irrigation(1, zone_config)
         assert result['success'] is True
         
@@ -182,7 +182,7 @@ class TestIrrigationController:
         # Set low moisture
         mock_adc.set_mock_value(1, 0.686)
         
-        zone_config = {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
+        zone_config = {'slope': 0.0, 'base_pressure': 200.0}
         result = irrigation_controller.start_irrigation(1, zone_config)
         
         assert result['success'] is False

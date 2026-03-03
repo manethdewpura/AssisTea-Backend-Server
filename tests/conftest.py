@@ -165,7 +165,7 @@ def irrigation_controller(mock_gpio, mock_adc, mock_soil_moisture_sensors,
     valve_controller_hw = SolenoidValveController(mock_gpio, zone_pins)
     
     # Initialize hydraulic components
-    pressure_calculator = PressureCalculator(reference_altitude_m=0.0)
+    pressure_calculator = PressureCalculator()
     valve_controller = HydraulicValveController(valve_controller_hw)
     pump_controller = HydraulicPumpController(pump_controller_hw)
     decision_engine = HybridEngine()
@@ -216,10 +216,6 @@ def app(irrigation_controller, fertigation_controller):
     from app.api import irrigation, fertigation
     irrigation.controllers = {
         'irrigation': irrigation_controller,
-        'zone_configs': {
-            1: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0},
-            2: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
-        }
     }
     fertigation.controllers = {
         'fertigation': fertigation_controller
