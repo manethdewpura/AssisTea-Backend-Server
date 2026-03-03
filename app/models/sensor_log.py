@@ -11,7 +11,6 @@ class SensorType(enum.Enum):
     SOIL_MOISTURE = "soil_moisture"
     TANK_LEVEL = "tank_level"
     SLOPE = "slope"
-    ALTITUDE = "altitude"
     WEATHER = "weather"
 
 

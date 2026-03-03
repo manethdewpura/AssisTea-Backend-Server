@@ -6,8 +6,10 @@ from typing import Dict, Callable, Optional
 from app.config.database import get_db
 from app.models.schedule import IrrigationSchedule, FertigationSchedule
 from app.config.config import (
-    ZONE_ID, ZONE_ALTITUDE_M, ZONE_SLOPE_DEGREES, ZONE_BASE_PRESSURE_KPA, SCHEDULE_TIMEZONE
+    ZONE_ID,
+    SCHEDULE_TIMEZONE,
 )
+from app.utils.system_config_helper import load_system_config
 
 # Timezone handling
 try:
@@ -203,11 +205,11 @@ class TaskScheduler:
     def _trigger_irrigation(self, schedule: IrrigationSchedule, db):
         """Trigger irrigation for a schedule."""
         try:
-            # Use hardcoded zone config
+            # Load current hydraulic / zone configuration from DB
+            cfg = load_system_config(db)
             zone_config = {
-                'altitude': ZONE_ALTITUDE_M,
-                'slope': ZONE_SLOPE_DEGREES,
-                'base_pressure': ZONE_BASE_PRESSURE_KPA
+                'slope': cfg.get('zone_slope_degrees'),
+                'base_pressure': cfg.get('zone_base_pressure_kpa'),
             }
             
             # Call callback with hardcoded zone_id (schedule.zone_id should always be ZONE_ID)
