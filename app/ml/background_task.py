@@ -48,7 +48,7 @@ class MLBackgroundTask:
                 
                 # Check if data is stale 
                 current_time = datetime.utcnow()
-                data_time = datetime.fromtimestamp(latest_current.timestamp / 1000)
+                data_time = datetime.utcfromtimestamp(latest_current.timestamp / 1000)
                 age_hours = (current_time - data_time).total_seconds() / 3600
                 
                 if age_hours > 12:
@@ -118,7 +118,7 @@ class MLBackgroundTask:
                 return
             
             # Store predictions in both weather_forecast AND weather_current tables
-            timestamp = int(datetime.utcnow().timestamp() * 1000)
+            timestamp = int(time.time() * 1000)
             forecast_records_created = 0
             current_records_created = 0
             

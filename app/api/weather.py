@@ -5,6 +5,7 @@ from app.ml.predictor import get_predictor, is_ml_available
 from sqlalchemy.exc import IntegrityError
 from app.api import api_bp
 import json
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -802,7 +803,7 @@ def check_data_staleness():
         
         # Check if data is stale
         current_time = datetime.utcnow()
-        data_time = datetime.fromtimestamp(latest_current.timestamp / 1000)
+        data_time = datetime.utcfromtimestamp(latest_current.timestamp / 1000)
         age_hours = (current_time - data_time).total_seconds() / 3600
         
         is_stale = age_hours > 12
@@ -886,7 +887,7 @@ def predict_with_ml():
             }), 400
         
         # Store predictions in both weather_forecast AND weather_current tables
-        timestamp = int(datetime.utcnow().timestamp() * 1000)
+        timestamp = int(time.time() * 1000)
         forecast_records_created = 0
         current_records_created = 0
         
@@ -1067,7 +1068,7 @@ def auto_predict_if_stale():
         else:
             # Check if data is stale (older than 12 hours)
             current_time = datetime.utcnow()
-            data_time = datetime.fromtimestamp(latest_current.timestamp / 1000)
+            data_time = datetime.utcfromtimestamp(latest_current.timestamp / 1000)
             age_hours = (current_time - data_time).total_seconds() / 3600
             
             if age_hours <= 12:
@@ -1135,7 +1136,7 @@ def auto_predict_if_stale():
                 'message': 'No city information available for predictions'
             }), 400
         
-        timestamp = int(datetime.utcnow().timestamp() * 1000)
+        timestamp = int(time.time() * 1000)
         forecast_records_created = 0
         current_records_created = 0
         
@@ -1303,8 +1304,8 @@ def get_latest_predictions():
     """
     try:
         # Get predictions from the last 24 hours
-        current_time = datetime.utcnow()
-        cutoff_timestamp = int((current_time - timedelta(hours=24)).timestamp() * 1000)
+        current_time_epoch = time.time()
+        cutoff_timestamp = int((current_time_epoch - 24 * 3600) * 1000)
         
         # Query ML-generated records from weather_current, sorted by time (newest first)
         ml_predictions = WeatherCurrent.query.filter(
@@ -1371,23 +1372,46 @@ def get_latest_predictions():
                 'predicted_at': pred.timestamp
             })
         
-        # Find the prediction closest to current time for the main display
-        current_time_ms = int(current_time.timestamp() * 1000)
-        closest_prediction = min(predictions, key=lambda p: abs(p['measured_at'] - current_time_ms))
+        # future predictions only, deduplicated by time slot
+        current_time_ms = int(current_time_epoch * 1000)
         
-        # Next 5 future predictions after the closest one, sorted chronologically
-        future_predictions = sorted(
-            [p for p in predictions if p['measured_at'] > closest_prediction['measured_at']],
-            key=lambda p: p['measured_at']
-        )[:5]
+        # Filter to future predictions only (measured_at > now)
+        future_only = [p for p in predictions if p['measured_at'] > current_time_ms]
+        
+        if not future_only:
+            # All predictions are in the past - fall back to most recent one
+            future_only = sorted(predictions, key=lambda p: p['measured_at'], reverse=True)
+        
+        # Deduplicate overlapping time slots (3-hour window = 10,800,000 ms)
+        # If multiple predictions exist for the same slot, keep highest confidence
+        slot_ms = 3 * 60 * 60 * 1000
+        deduped = {}
+        for p in future_only:
+            slot_key = p['measured_at'] // slot_ms
+            if slot_key not in deduped or p['confidence_score'] > deduped[slot_key]['confidence_score']:
+                deduped[slot_key] = p
+        
+        # Sort chronologically
+        sorted_predictions = sorted(deduped.values(), key=lambda p: p['measured_at'])
+        
+        if not sorted_predictions:
+            return jsonify({
+                'success': False,
+                'message': 'No relevant ML predictions available',
+                'predictions': []
+            }), 404
+        
+        # Big card = nearest future prediction, other = next 5
+        primary_prediction = sorted_predictions[0]
+        other_predictions = sorted_predictions[1:8]
         
         return jsonify({
             'success': True,
-            'message': f'Found {len(predictions)} ML predictions',
-            'current': closest_prediction['data'],
-            'current_confidence': closest_prediction['confidence_score'],
-            'predictions': future_predictions,
-            'prediction_count': len(future_predictions)
+            'message': f'Found {len(sorted_predictions)} ML predictions',
+            'current': primary_prediction['data'],
+            'best_confidence': primary_prediction['confidence_score'],
+            'predictions': [primary_prediction] + other_predictions,
+            'prediction_count': 1 + len(other_predictions)
         }), 200
         
     except Exception as e:
