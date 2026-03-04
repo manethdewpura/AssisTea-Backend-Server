@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_DIR="/home/assistea/AssisTea-Backend-Server"
 VENV_PIP="$REPO_DIR/venv/bin/pip"
 LOG_FILE="/home/assistea/cron.log"
-BRANCH="${BRANCH:-dev}"
+BRANCH="${BRANCH:-main}"
 RECIPIENTS="${RECIPIENTS:-}"
 
 log() {

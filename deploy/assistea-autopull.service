@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=assistea
-Environment=BRANCH=dev
+Environment=BRANCH=main
 Environment=RECIPIENTS=
 ExecStart=/home/assistea/AssisTea-Backend-Server/deploy/auto_update.sh
 ExecStartPost=+/bin/systemctl restart assistea.service

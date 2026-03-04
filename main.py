@@ -314,4 +314,4 @@ def health_check():
 if __name__ == '__main__':
     print("Starting Irrigation and Fertigation Control System...")
     print(f"Hardware mode: {'MOCK' if USE_MOCK_HARDWARE else 'REAL'}")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
