@@ -1,0 +1,17 @@
+[Unit]
+Description=AssisTea Flask Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=assistea
+WorkingDirectory=/home/assistea/AssisTea-Backend-Server
+ExecStart=/home/assistea/AssisTea-Backend-Server/venv/bin/python main.py
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/assistea/AssisTea-Backend-Server/.env
+Environment=PATH=/home/assistea/AssisTea-Backend-Server/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target

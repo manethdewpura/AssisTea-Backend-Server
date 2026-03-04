@@ -1,0 +1,12 @@
+[Unit]
+Description=AssisTea Git Auto Pull
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=assistea
+Environment=BRANCH=dev
+Environment=RECIPIENTS=
+ExecStart=/home/assistea/AssisTea-Backend-Server/deploy/auto_update.sh
+ExecStartPost=+/bin/systemctl restart assistea.service
