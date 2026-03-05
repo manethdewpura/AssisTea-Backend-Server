@@ -387,12 +387,12 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
         - city_info_dict: Dict with city information (id, name, country, coords)
         - data_source_info: Dict with info about data sources used
     """
-    from datetime import datetime, timedelta
+    import time as _time
     
-    current_time = datetime.utcnow()
-    cutoff_timestamp = int((current_time - timedelta(hours=lookback_hours)).timestamp() * 1000)
-    cutoff_timestamp_seconds = int((current_time - timedelta(hours=lookback_hours)).timestamp())
-    current_timestamp_seconds = int(current_time.timestamp())
+    current_time_epoch = _time.time()
+    cutoff_timestamp = int((current_time_epoch - lookback_hours * 3600) * 1000)
+    cutoff_timestamp_seconds = int(current_time_epoch - lookback_hours * 3600)
+    current_timestamp_seconds = int(current_time_epoch)
     
     historical_data = []
     city_info = {}
