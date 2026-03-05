@@ -1375,18 +1375,22 @@ def get_latest_predictions():
         # future predictions only, deduplicated by time slot
         current_time_ms = int(current_time_epoch * 1000)
         
-        # Filter to future predictions only (measured_at > now)
+         # Filter to future predictions only (measured_at > now)
         future_only = [p for p in predictions if p['measured_at'] > current_time_ms]
-        
-        if not future_only:
-            # All predictions are in the past - fall back to most recent one
-            future_only = sorted(predictions, key=lambda p: p['measured_at'], reverse=True)
         
         # Deduplicate overlapping time slots (3-hour window = 10,800,000 ms)
         # If multiple predictions exist for the same slot, keep highest confidence
         slot_ms = 3 * 60 * 60 * 1000
+        
+        # Determine if we are in fallback mode (all predictions are in the past)
+        # We check the original 'predictions' list because 'future_only' might be empty
+        was_fallback = not any(p['measured_at'] > current_time_ms for p in predictions)
+        
+        # Source of predictions for deduplication
+        source_list = predictions if was_fallback else future_only
+        
         deduped = {}
-        for p in future_only:
+        for p in source_list:
             slot_key = p['measured_at'] // slot_ms
             if slot_key not in deduped or p['confidence_score'] > deduped[slot_key]['confidence_score']:
                 deduped[slot_key] = p
@@ -1401,17 +1405,25 @@ def get_latest_predictions():
                 'predictions': []
             }), 404
         
-        # Big card = nearest future prediction, other = next 5
-        primary_prediction = sorted_predictions[0]
-        other_predictions = sorted_predictions[1:8]
+        if was_fallback:
+            # All are in the past, pick the most recent
+            primary_prediction = sorted_predictions[-1]
+            # others in reverse chronological order
+            other_predictions = sorted_predictions[:-1][::-1][:7]
+        else:
+            primary_prediction = sorted_predictions[0]
+            other_predictions = sorted_predictions[1:8]
         
         return jsonify({
             'success': True,
-            'message': f'Found {len(sorted_predictions)} ML predictions',
+            'message': f'Found {len(sorted_predictions)} ML predictions' + (' (Fallback)' if was_fallback else ''),
             'current': primary_prediction['data'],
+            # Backward compatibility: return both keys
             'best_confidence': primary_prediction['confidence_score'],
-            'predictions': [primary_prediction] + other_predictions,
-            'prediction_count': 1 + len(other_predictions)
+            'current_confidence': primary_prediction['confidence_score'], 
+            # Restore previous behavior: 'predictions' contains other/future items only
+            'predictions': other_predictions,
+            'prediction_count': len(other_predictions)
         }), 200
         
     except Exception as e:

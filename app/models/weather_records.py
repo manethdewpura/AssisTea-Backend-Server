@@ -388,7 +388,6 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
         - data_source_info: Dict with info about data sources used
     """
     import time as _time
-    from datetime import datetime, timedelta
     
     current_time_epoch = _time.time()
     cutoff_timestamp = int((current_time_epoch - lookback_hours * 3600) * 1000)
