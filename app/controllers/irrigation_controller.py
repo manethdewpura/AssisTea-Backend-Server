@@ -29,7 +29,8 @@ class IrrigationController:
                  soil_moisture_sensors: Dict[int, SoilMoistureSensor],
                  weather_reader: WeatherReader,
                  pressure_sensor: Optional[PressureSensor],
-                 db_session_factory: Callable):
+                 db_session_factory: Callable,
+                 irrigation_pump_solenoid: Optional[object] = None):
         """
         Initialize irrigation controller.
         
@@ -42,6 +43,7 @@ class IrrigationController:
             weather_reader: Weather reader instance
             pressure_sensor: System-wide irrigation pressure sensor (common for all zones)
             db_session_factory: Function that returns a database session
+            irrigation_pump_solenoid: Optional solenoid valve to open when irrigation runs (closed when stopped)
         """
         self.pressure_calculator = pressure_calculator
         self.valve_controller = valve_controller
@@ -51,6 +53,7 @@ class IrrigationController:
         self.weather_reader = weather_reader
         self.pressure_sensor = pressure_sensor
         self.db_session_factory = db_session_factory
+        self.irrigation_pump_solenoid = irrigation_pump_solenoid
         
         self.is_running = False
         self.current_zone: Optional[int] = None
@@ -234,6 +237,11 @@ class IrrigationController:
             )
             target_pressure = pressure_calc['total_required_pressure_kpa']
             
+            # Open irrigation pump solenoid so water can flow (when present)
+            if self.irrigation_pump_solenoid:
+                self.irrigation_pump_solenoid.open()
+                self._log_system(LogLevel.INFO, 'irrigation_controller', 'Irrigation pump solenoid opened')
+            
             # Open zone valve and close others
             if not self.valve_controller.open_zone(zone_id, close_others=True):
                 raise Exception(f'Failed to open valve for zone {zone_id}')
@@ -303,6 +311,14 @@ class IrrigationController:
             self._log_system(LogLevel.ERROR, 'irrigation_controller',
                            f'Irrigation cycle error for zone {zone_id}: {str(e)}')
             self._log_operation(zone_id, OperationStatus.FAILED)
+            # Ensure pump, zone valve, and solenoid are closed on error
+            try:
+                self.pump_controller.stop_pressure_control()
+                self.valve_controller.close_zone(zone_id)
+                if self.irrigation_pump_solenoid:
+                    self.irrigation_pump_solenoid.close()
+            except Exception:
+                pass
             self.is_running = False
             self.current_zone = None
 
@@ -313,6 +329,11 @@ class IrrigationController:
         
         # Close zone valve
         self.valve_controller.close_zone(zone_id)
+        
+        # Close irrigation pump solenoid
+        if self.irrigation_pump_solenoid:
+            self.irrigation_pump_solenoid.close()
+            self._log_system(LogLevel.INFO, 'irrigation_controller', 'Irrigation pump solenoid closed')
         
         # Get end moisture
         end_moisture = start_moisture

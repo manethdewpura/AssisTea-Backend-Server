@@ -2,17 +2,20 @@
 from flask import Blueprint, jsonify, request
 from app.api import api_bp
 from app.services.solenoid_state_manager import SolenoidStateManager
+from app.config.config import ZONE_ID
 
 solenoids_bp = Blueprint('solenoids', __name__)
 api_bp.register_blueprint(solenoids_bp, url_prefix='/solenoids')
 
 # Global state manager (will be initialized in main.py)
 state_manager: SolenoidStateManager = None
+# Optional valve controller for zone valve status (set in main.py)
+valve_controller = None
 
 
 @solenoids_bp.route('/status', methods=['GET'])
 def get_all_solenoid_status():
-    """Get status of all solenoids."""
+    """Get status of all solenoids and zone valve(s)."""
     try:
         if not state_manager:
             return jsonify({
@@ -28,6 +31,15 @@ def get_all_solenoid_status():
             info = state_manager.get_solenoid_info(solenoid_name)
             if info:
                 detailed_states[solenoid_name] = info
+        
+        # Add zone valve status (read from valve controller; not stored in DB)
+        if valve_controller is not None:
+            zone_open = valve_controller.is_zone_open(ZONE_ID)
+            detailed_states[f'zone_valve_{ZONE_ID}'] = {
+                'solenoid_name': f'zone_valve_{ZONE_ID}',
+                'is_open': zone_open,
+                'last_updated': None,
+            }
         
         return jsonify({
             'success': True,

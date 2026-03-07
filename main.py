@@ -191,7 +191,8 @@ irrigation_controller = IrrigationController(
     soil_moisture_sensors=soil_moisture_sensors,
     weather_reader=weather_reader,
     pressure_sensor=irrigation_pressure_sensor,
-    db_session_factory=get_db
+    db_session_factory=get_db,
+    irrigation_pump_solenoid=irrigation_pump_solenoid,
 )
 
 # Initialize fertigation controller with separate irrigation and fertilizer pumps
@@ -288,6 +289,7 @@ if USE_MOCK_HARDWARE:
 
 # Set up solenoid state manager for API
 solenoids.state_manager = solenoid_state_manager
+solenoids.valve_controller = valve_controller
 
 # Root route
 @app.route('/')
