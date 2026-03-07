@@ -5,9 +5,16 @@ from app.config.config import (
     ZONE_ID,
     ZONE_VALVE_GPIO_PIN,
     ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
+    PIPE_LENGTH_M,
+    PIPE_DIAMETER_M,
+    ESTIMATED_FLOW_RATE_M3_PER_S,
+    DARCY_FRICTION_FACTOR,
+    MINOR_LOSS_COEFFICIENT_K,
+    PRESSURE_SAFETY_MARGIN_PERCENT,
 )
 from app.config.database import get_db
 from app.utils.system_config_helper import load_system_config, update_system_config
+from app.hydraulics.pressure_calculator import PressureCalculator
 
 system_bp = Blueprint('system', __name__)
 api_bp.register_blueprint(system_bp, url_prefix='/system')
@@ -88,6 +95,59 @@ def get_system_status():
         return jsonify({
             'success': True,
             'status': status
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@system_bp.route('/calculated-pressure', methods=['GET'])
+def get_calculated_pressure():
+    """
+    Get the calculated required irrigation pressure for the current system setup.
+    Uses hydraulic config from the database (pipe length, diameter, flow rate, slope, base pressure).
+    Returns the same calculation that would be used when starting irrigation.
+    """
+    try:
+        db = next(get_db())
+        try:
+            cfg = load_system_config(db)
+        finally:
+            db.close()
+
+        pipe_length_m = cfg.get('pipe_length_m', PIPE_LENGTH_M)
+        pipe_diameter_m = cfg.get('pipe_diameter_m', PIPE_DIAMETER_M)
+        flow_rate_m3_per_s = cfg.get('estimated_flow_rate_m3_per_s', ESTIMATED_FLOW_RATE_M3_PER_S)
+        zone_slope_degrees = cfg.get('zone_slope_degrees', 25.0)
+        zone_base_pressure_kpa = cfg.get('zone_base_pressure_kpa', 200.0)
+
+        # If flow rate looks like L/s (e.g. 3 meaning 3 L/s) instead of m³/s, convert: 1 m³/s = 1000 L/s
+        if flow_rate_m3_per_s > 0.05:
+            flow_rate_m3_per_s = flow_rate_m3_per_s / 1000.0
+
+        calculator = PressureCalculator(
+            pipe_length_m=pipe_length_m,
+            pipe_diameter_m=pipe_diameter_m,
+            flow_rate_m3_per_s=flow_rate_m3_per_s,
+            friction_factor=DARCY_FRICTION_FACTOR,
+            minor_loss_coefficient_k=MINOR_LOSS_COEFFICIENT_K,
+            safety_margin_percent=PRESSURE_SAFETY_MARGIN_PERCENT,
+        )
+        result = calculator.calculate_required_pressure(zone_slope_degrees, zone_base_pressure_kpa)
+
+        return jsonify({
+            'success': True,
+            'setup': {
+                'pipe_length_m': pipe_length_m,
+                'pipe_diameter_m': pipe_diameter_m,
+                'estimated_flow_rate_m3_per_s': flow_rate_m3_per_s,
+                'zone_slope_degrees': zone_slope_degrees,
+                'zone_base_pressure_kpa': zone_base_pressure_kpa,
+            },
+            'calculated_pressure': result,
+            'total_required_pressure_kpa': result['total_required_pressure_kpa'],
         }), 200
     except Exception as e:
         return jsonify({
