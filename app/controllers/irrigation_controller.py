@@ -57,13 +57,14 @@ class IrrigationController:
         self.operation_thread: Optional[threading.Thread] = None
         self.start_time: Optional[datetime] = None
 
-    def start_irrigation(self, zone_id: int, zone_config: Dict) -> Dict[str, any]:
+    def start_irrigation(self, zone_id: int, zone_config: Dict, skip_weather_check: bool = False) -> Dict[str, any]:
         """
         Start irrigation cycle for a zone.
         
         Args:
             zone_id: Zone ID to irrigate
             zone_config: Zone configuration dictionary
+            skip_weather_check: If True, do not block on weather; start irrigation regardless of conditions
             
         Returns:
             Dictionary with operation status
@@ -75,39 +76,52 @@ class IrrigationController:
                 'current_zone': self.current_zone
             }
         
-        # Check weather (skip if not clear)
-        try:
-            weather_data = self.weather_reader.read_standardized()
-        except Exception as e:
-            self._log_system(LogLevel.ERROR, 'irrigation_controller',
-                           f'Failed to read weather data: {str(e)}')
-            return {
-                'success': False,
-                'message': f'Failed to retrieve weather data: {str(e)}',
-                'error': 'weather_read_failed'
+        if skip_weather_check:
+            # Use a minimal clear placeholder so downstream logic and logging still work
+            weather_data = {
+                'condition': 'clear',
+                'temperature': None,
+                'humidity': None,
+                'precipitation': 0.0,
+                'is_ml_generated': False,
+                'confidence_score': 1.0,
             }
-        
-        # Log weather information for tracking
-        weather_source = 'ML prediction' if weather_data.get('is_ml_generated', False) else 'API'
-        weather_confidence = weather_data.get('confidence_score', 1.0)
-        self._log_system(LogLevel.INFO, 'irrigation_controller',
-                        f'Weather check: condition={weather_data["condition"]}, '
-                        f'temp={weather_data.get("temperature", "N/A")}°C, '
-                        f'humidity={weather_data.get("humidity", "N/A")}%, '
-                        f'source={weather_source}, confidence={weather_confidence:.2f}')
-        
-        if weather_data['condition'] != 'clear':
-            weather_display = weather_data['condition'].capitalize()
-            return {
-                'success': False,
-                'message': f'Irrigation skipped: Weather is {weather_display.lower()}',
-                'weather_condition': weather_data['condition'],
-                'weather_temperature': weather_data.get('temperature'),
-                'weather_humidity': weather_data.get('humidity'),
-                'weather_precipitation': weather_data.get('precipitation', 0.0),
-                'is_ml_generated': weather_data.get('is_ml_generated', False),
-                'confidence_score': weather_data.get('confidence_score', 1.0)
-            }
+            self._log_system(LogLevel.INFO, 'irrigation_controller',
+                            'Weather check skipped by user; starting irrigation without weather validation')
+        else:
+            # Check weather (skip if not clear)
+            try:
+                weather_data = self.weather_reader.read_standardized()
+            except Exception as e:
+                self._log_system(LogLevel.ERROR, 'irrigation_controller',
+                               f'Failed to read weather data: {str(e)}')
+                return {
+                    'success': False,
+                    'message': f'Failed to retrieve weather data: {str(e)}',
+                    'error': 'weather_read_failed'
+                }
+            
+            # Log weather information for tracking
+            weather_source = 'ML prediction' if weather_data.get('is_ml_generated', False) else 'API'
+            weather_confidence = weather_data.get('confidence_score', 1.0)
+            self._log_system(LogLevel.INFO, 'irrigation_controller',
+                            f'Weather check: condition={weather_data["condition"]}, '
+                            f'temp={weather_data.get("temperature", "N/A")}°C, '
+                            f'humidity={weather_data.get("humidity", "N/A")}%, '
+                            f'source={weather_source}, confidence={weather_confidence:.2f}')
+            
+            if weather_data['condition'] != 'clear':
+                weather_display = weather_data['condition'].capitalize()
+                return {
+                    'success': False,
+                    'message': f'Irrigation skipped: Weather is {weather_display.lower()}',
+                    'weather_condition': weather_data['condition'],
+                    'weather_temperature': weather_data.get('temperature'),
+                    'weather_humidity': weather_data.get('humidity'),
+                    'weather_precipitation': weather_data.get('precipitation', 0.0),
+                    'is_ml_generated': weather_data.get('is_ml_generated', False),
+                    'confidence_score': weather_data.get('confidence_score', 1.0)
+                }
         
         # Check soil moisture
         if zone_id not in self.soil_moisture_sensors:
