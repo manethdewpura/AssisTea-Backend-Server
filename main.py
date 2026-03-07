@@ -110,6 +110,7 @@ from app.config.config import (
     ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
     ZONE_SOIL_MOISTURE_DRY_VALUE,
     ZONE_SOIL_MOISTURE_WET_VALUE,
+    MAX_PRESSURE_KPA,
 )
 
 # Initialize single zone with hardcoded configuration
@@ -135,11 +136,18 @@ logging.info(f"✓ Soil moisture sensor initialized for zone {ZONE_ID} on ADS111
 logging.info(f"✓ Zone valve GPIO pin: {ZONE_VALVE_GPIO_PIN}")
 
 # Irrigation pump pressure sensor on A2 (channel 2) - system-wide (common for all zones)
-irrigation_pressure_sensor = PressureSensor('pressure_irrigation', adc, ADS1115_PRESSURE_CHANNEL, zone_id=None)  # A2 for irrigation pump
+# Use 0–MAX so mock can display low calculated pressures (e.g. base 10 kPa, short pipe)
+irrigation_pressure_sensor = PressureSensor(
+    'pressure_irrigation', adc, ADS1115_PRESSURE_CHANNEL, zone_id=None,
+    min_pressure_kpa=0.0, max_pressure_kpa=MAX_PRESSURE_KPA
+)
 logging.info("✓ Irrigation pressure sensor initialized (system-wide)")
 
 # Fertilizer pump pressure sensor on A3 (channel 3) - system-wide
-fertilizer_pressure_sensor = PressureSensor('pressure_fertilizer', adc, ADS1115_FERTILIZER_PRESSURE_CHANNEL, zone_id=None)  # A3 for fertilizer pump
+fertilizer_pressure_sensor = PressureSensor(
+    'pressure_fertilizer', adc, ADS1115_FERTILIZER_PRESSURE_CHANNEL, zone_id=None,
+    min_pressure_kpa=0.0, max_pressure_kpa=MAX_PRESSURE_KPA
+)
 logging.info("✓ Fertilizer pressure sensor initialized (system-wide)")
 tank_level_sensor = TankLevelSensor(
     'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,

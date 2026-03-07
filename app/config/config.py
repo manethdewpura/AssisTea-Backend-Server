@@ -66,7 +66,8 @@ MAX_SOIL_MOISTURE_PERCENT = float(os.getenv('MAX_SOIL_MOISTURE_PERCENT', '100.0'
 ADEQUATE_SOIL_MOISTURE_PERCENT = float(os.getenv('ADEQUATE_SOIL_MOISTURE_PERCENT', '60.0'))
 
 MIN_PRESSURE_KPA = float(os.getenv('MIN_PRESSURE_KPA', '100.0'))
-MAX_PRESSURE_KPA = float(os.getenv('MAX_PRESSURE_KPA', '500.0'))
+# Default 600 allows mock to display calculated target pressure (e.g. ~548 kPa) instead of capping at 500
+MAX_PRESSURE_KPA = float(os.getenv('MAX_PRESSURE_KPA', '600.0'))
 
 # Hydraulic constants (for realistic pressure calculations)
 WATER_DENSITY_KG_PER_M3 = 1000.0  # kg/m³ (fresh water at ~20°C)
