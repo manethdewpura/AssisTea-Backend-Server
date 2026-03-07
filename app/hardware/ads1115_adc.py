@@ -48,12 +48,12 @@ class ADS1115ADC:
                 print(f"Warning: Could not initialize ADS1115, using mock: {str(e)}")
                 self.use_mock = True
         
-        # Mock values for development
+        # Mock values for development: start at 0 (pressure 0 kPa; soil moisture set in main.py)
         self.mock_values = {
-            self.CHANNEL_0: 0.5,
-            self.CHANNEL_1: 0.5,
-            self.CHANNEL_2: 0.5,
-            self.CHANNEL_3: 0.5,
+            self.CHANNEL_0: 0.0,
+            self.CHANNEL_1: 0.0,
+            self.CHANNEL_2: 0.0,
+            self.CHANNEL_3: 0.0,
         }
 
     def get_channel(self, channel: int) -> 'AnalogIn':
@@ -140,7 +140,7 @@ class ADS1115ADC:
 class MockAnalogIn:
     """Mock AnalogIn class for development/testing."""
 
-    def __init__(self, channel: int, initial_value: float = 0.5):
+    def __init__(self, channel: int, initial_value: float = 0.0):
         """
         Initialize mock analog input.
         
