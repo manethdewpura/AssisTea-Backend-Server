@@ -20,6 +20,7 @@ USE_MOCK_HARDWARE = not IS_RASPBERRY_PI or os.getenv('USE_MOCK_HARDWARE', 'false
 IRRIGATION_PUMP_GPIO_PIN = int(os.getenv('IRRIGATION_PUMP_GPIO_PIN', '23'))  # Irrigation pump motor
 FERTILIZER_PUMP_GPIO_PIN = int(os.getenv('FERTILIZER_PUMP_GPIO_PIN', '22'))  # Fertilizer pump motor
 IRRIGATION_PUMP_SOLENOID_PIN = int(os.getenv('IRRIGATION_PUMP_SOLENOID_PIN', '24'))  # Irrigation pump solenoid valve
+FERTILIZER_PUMP_SOLENOID_PIN = int(os.getenv('FERTILIZER_PUMP_SOLENOID_PIN', '21'))  # Fertilizer pump solenoid (open with tank outlet)
 
 # Fertilizer tank solenoids
 TANK_INLET_SOLENOID_PIN = int(os.getenv('TANK_INLET_SOLENOID_PIN', '25'))  # Tank inlet solenoid
@@ -38,7 +39,8 @@ ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(
 # Sensor pins (for digital sensors and tank level)
 DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '22'))  # Tank level sensor trigger (TRIG)
 DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo (ECHO)
-# Ultrasonic measures distance to water: high distance = empty, low distance = full
+# Tank level: ultrasonic sensor measures distance to water surface (cm)
+# Tank full  -> sensor reads 10 cm (water close). Tank empty -> sensor reads 100 cm (water far).
 TANK_EMPTY_DISTANCE_CM = float(os.getenv('TANK_EMPTY_DISTANCE_CM', '100.0'))  # Sensor reading when tank is empty (cm)
 TANK_FULL_DISTANCE_CM = float(os.getenv('TANK_FULL_DISTANCE_CM', '10.0'))  # Sensor reading when tank is full (cm)
 
@@ -65,9 +67,6 @@ ADEQUATE_SOIL_MOISTURE_PERCENT = float(os.getenv('ADEQUATE_SOIL_MOISTURE_PERCENT
 
 MIN_PRESSURE_KPA = float(os.getenv('MIN_PRESSURE_KPA', '100.0'))
 MAX_PRESSURE_KPA = float(os.getenv('MAX_PRESSURE_KPA', '500.0'))
-
-TANK_EMPTY_LEVEL_CM = float(os.getenv('TANK_EMPTY_LEVEL_CM', '5.0'))
-TANK_FULL_LEVEL_CM = float(os.getenv('TANK_FULL_LEVEL_CM', '50.0'))
 
 # Hydraulic constants (for realistic pressure calculations)
 WATER_DENSITY_KG_PER_M3 = 1000.0  # kg/m³ (fresh water at ~20°C)

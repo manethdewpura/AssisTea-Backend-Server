@@ -2,8 +2,8 @@
 import pytest
 import time
 from app.config.config import (
-    TANK_FULL_LEVEL_CM,
-    TANK_EMPTY_LEVEL_CM,
+    TANK_FULL_DISTANCE_CM,
+    TANK_EMPTY_DISTANCE_CM,
     ADEQUATE_SOIL_MOISTURE_PERCENT,
 )
 

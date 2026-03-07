@@ -7,11 +7,12 @@ from app.hydraulics.valve_controller import HydraulicValveController
 from app.hydraulics.pump_controller import HydraulicPumpController
 from app.hardware.tank_valve_controller import TankValveController
 from app.hardware.irrigation_pump_solenoid import IrrigationPumpSolenoid
+from app.hardware.fertilizer_pump_solenoid import FertilizerPumpSolenoid
 from app.sensors.tank_level import TankLevelSensor
 from app.sensors.pressure import PressureSensor
 from app.sensors.weather import WeatherReader
 from app.config.config import (
-    TANK_EMPTY_LEVEL_CM, TANK_FULL_LEVEL_CM, MAX_OPERATION_DURATION_SEC,
+    TANK_EMPTY_DISTANCE_CM, TANK_FULL_DISTANCE_CM, MAX_OPERATION_DURATION_SEC,
     PUMP_PRESSURE_TOLERANCE_KPA
 )
 from app.models.operational_log import OperationalLog, OperationType, OperationStatus
@@ -30,10 +31,11 @@ class FertigationController:
                  pressure_sensor: Optional[PressureSensor] = None,
                  fertilizer_pump_controller: Optional[HydraulicPumpController] = None,
                  irrigation_pump_controller: Optional[HydraulicPumpController] = None,
-                 irrigation_pump_solenoid: Optional[IrrigationPumpSolenoid] = None):
+                 irrigation_pump_solenoid: Optional[IrrigationPumpSolenoid] = None,
+                 fertilizer_pump_solenoid: Optional[FertilizerPumpSolenoid] = None):
         """
         Initialize fertigation controller.
-        
+
         Args:
             valve_controller: Zone valve controller instance
             tank_valve_controller: Tank valve controller for inlet/outlet
@@ -45,6 +47,7 @@ class FertigationController:
             fertilizer_pump_controller: Fertilizer pump controller for flushing (GPIO 22)
             irrigation_pump_controller: Irrigation pump controller for filling (GPIO 23)
             irrigation_pump_solenoid: Irrigation pump solenoid valve controller (GPIO 24)
+            fertilizer_pump_solenoid: Fertilizer pump solenoid valve (opened with tank outlet)
         """
         self.valve_controller = valve_controller
         self.tank_valve_controller = tank_valve_controller
@@ -56,6 +59,7 @@ class FertigationController:
         self.fertilizer_pump_controller = fertilizer_pump_controller
         self.irrigation_pump_controller = irrigation_pump_controller
         self.irrigation_pump_solenoid = irrigation_pump_solenoid
+        self.fertilizer_pump_solenoid = fertilizer_pump_solenoid
         
         self.is_running = False
         self.current_zone: Optional[int] = None
@@ -136,20 +140,23 @@ class FertigationController:
                 self._log_system(LogLevel.INFO, 'fertigation_controller',
                                f'Irrigation pump started to fill tank at {fill_pressure} kPa')
             
-            # Wait for tank to fill
+            # Wait for tank to fill: sensor reads distance; full when distance <= 10 cm
             tank_filled = False
+            initial_tank_level = None
             fill_start_time = time.time()
             fill_timeout = 300  # 5 minutes max for filling
-            
+            tolerance_cm = 2.0
+
             while time.time() - fill_start_time < fill_timeout:
                 try:
                     level_data = self.tank_level_sensor.read_standardized()
-                    level_cm = level_data['value']
-                    
-                    if level_cm >= TANK_FULL_LEVEL_CM - 2:  # Allow 2cm tolerance
+                    distance_cm = level_data.get('raw_value', level_data['value'])
+                    # Tank full when sensor distance <= TANK_FULL_DISTANCE_CM (10 cm)
+                    if distance_cm <= TANK_FULL_DISTANCE_CM + tolerance_cm:
                         tank_filled = True
+                        initial_tank_level = level_data.get('value')
                         self._log_system(LogLevel.INFO, 'fertigation_controller',
-                                       f'Tank filled to {level_cm:.1f} cm')
+                                       f'Tank full (sensor {distance_cm:.1f} cm)')
                         break
                 except Exception as e:
                     self._log_system(LogLevel.WARNING, 'fertigation_controller',
@@ -168,11 +175,15 @@ class FertigationController:
             if not tank_filled:
                 raise Exception('Tank filling timeout or failed')
             
-            # Step 4: Open tank outlet solenoid
+            # Step 4: Open tank outlet solenoid and fertilizer pump solenoid together
             self._log_system(LogLevel.INFO, 'fertigation_controller',
                            'Opening tank outlet valve to flush fertilizer')
             self.tank_valve_controller.open_outlet()
-            
+            if self.fertilizer_pump_solenoid:
+                self.fertilizer_pump_solenoid.open()
+                self._log_system(LogLevel.INFO, 'fertigation_controller',
+                               'Fertilizer pump solenoid opened')
+
             # Step 5: Close irrigation pump solenoid valve
             if self.irrigation_pump_solenoid:
                 self.irrigation_pump_solenoid.close()
@@ -196,12 +207,12 @@ class FertigationController:
             
             # Update status
             self._log_operation(zone_id, OperationStatus.IN_PROGRESS)
-            
-            # Monitor tank level until empty
+
+            # Monitor tank level until empty (sensor reads distance; empty when distance >= 100 cm)
             operation_start_time = time.time()
-            initial_tank_level = TANK_FULL_LEVEL_CM
             last_pressure_check = time.time()
-            
+            tolerance_cm = 2.0
+
             while self.is_running:
                 # Check for timeout
                 if time.time() - operation_start_time > MAX_OPERATION_DURATION_SEC:
@@ -233,12 +244,11 @@ class FertigationController:
                 
                 try:
                     level_data = self.tank_level_sensor.read_standardized()
-                    level_cm = level_data['value']
-                    
-                    # Check if tank is empty
-                    if level_cm <= TANK_EMPTY_LEVEL_CM + 2:  # Allow 2cm tolerance
+                    distance_cm = level_data.get('raw_value', level_data['value'])
+                    # Tank empty when sensor distance >= TANK_EMPTY_DISTANCE_CM (100 cm)
+                    if distance_cm >= TANK_EMPTY_DISTANCE_CM - tolerance_cm:
                         self._log_system(LogLevel.INFO, 'fertigation_controller',
-                                       f'Tank emptied to {level_cm:.1f} cm')
+                                       f'Tank empty (sensor {distance_cm:.1f} cm)')
                         break
                 except Exception as e:
                     self._log_system(LogLevel.WARNING, 'fertigation_controller',
@@ -251,9 +261,13 @@ class FertigationController:
                 self.fertilizer_pump_controller.stop_pressure_control()
                 self._log_system(LogLevel.INFO, 'fertigation_controller',
                                'Fertilizer pump stopped')
-            
-            # Close outlet valve
+
+            # Close outlet valve and fertilizer pump solenoid together
             self.tank_valve_controller.close_outlet()
+            if self.fertilizer_pump_solenoid:
+                self.fertilizer_pump_solenoid.close()
+                self._log_system(LogLevel.INFO, 'fertigation_controller',
+                               'Fertilizer pump solenoid closed')
             
             # Stop fertigation
             self._stop_fertigation(zone_id, initial_tank_level)
@@ -276,10 +290,15 @@ class FertigationController:
                 except:
                     pass
             
-            # Ensure valves are closed
+            # Ensure valves are closed (outlet and fertilizer pump solenoid)
             self.tank_valve_controller.close_all()
+            if self.fertilizer_pump_solenoid:
+                try:
+                    self.fertilizer_pump_solenoid.close()
+                except Exception:
+                    pass
             self.valve_controller.close_zone(zone_id)
-            
+
             self.is_running = False
             self.current_zone = None
 
@@ -302,8 +321,8 @@ class FertigationController:
         self.tank_valve_controller.close_all()
         self.valve_controller.close_zone(zone_id)
         
-        # Get final tank level
-        final_tank_level = TANK_EMPTY_LEVEL_CM
+        # Get final tank level (fill depth; 0 when empty)
+        final_tank_level = 0.0
         try:
             level_data = self.tank_level_sensor.read_standardized()
             final_tank_level = level_data['value']
@@ -333,8 +352,8 @@ class FertigationController:
         self.is_running = False
         
         if self.current_zone:
-            # Get initial tank level for logging
-            initial_level = TANK_FULL_LEVEL_CM
+            # Get initial tank level for logging (fill depth; full = empty_dist - full_dist)
+            initial_level = TANK_EMPTY_DISTANCE_CM - TANK_FULL_DISTANCE_CM
             try:
                 level_data = self.tank_level_sensor.read_standardized()
                 initial_level = level_data['value']
@@ -382,7 +401,8 @@ class FertigationController:
             'fertilizer_pressure_kpa': fertilizer_pressure,
             'fertilizer_pump_status': fertilizer_pump_status,
             'irrigation_pump_status': irrigation_pump_status,
-            'irrigation_pump_solenoid_open': self.irrigation_pump_solenoid.is_open() if self.irrigation_pump_solenoid else None
+            'irrigation_pump_solenoid_open': self.irrigation_pump_solenoid.is_open() if self.irrigation_pump_solenoid else None,
+            'fertilizer_pump_solenoid_open': self.fertilizer_pump_solenoid.is_open() if self.fertilizer_pump_solenoid else None
         }
 
     def _log_operation(self, zone_id: int, status: OperationStatus, **kwargs):
