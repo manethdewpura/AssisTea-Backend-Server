@@ -11,7 +11,7 @@ class PressureSensor(BaseSensor):
     """Water pressure sensor with noise filtering via ADS1115 ADC."""
 
     def __init__(self, sensor_id: str, adc: ADS1115ADC, channel: int, zone_id: Optional[int] = None,
-                 min_pressure_kpa: float = 0.0, max_pressure_kpa: float = 500.0):
+                 min_pressure_kpa: float = 0.0, max_pressure_kpa: float = 600.0):
         """
         Initialize pressure sensor.
         

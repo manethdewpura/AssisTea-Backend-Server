@@ -2,7 +2,12 @@
 from typing import Dict, Optional, Any
 import time
 from app.hardware.pump_interface import PumpInterface
-from app.config.config import PUMP_PRESSURE_TOLERANCE_KPA, PUMP_ADJUSTMENT_INTERVAL_SEC, USE_MOCK_HARDWARE
+from app.config.config import (
+    PUMP_PRESSURE_TOLERANCE_KPA,
+    PUMP_ADJUSTMENT_INTERVAL_SEC,
+    USE_MOCK_HARDWARE,
+    MAX_PRESSURE_KPA,
+)
 
 
 class HydraulicPumpController:
@@ -94,10 +99,9 @@ class HydraulicPumpController:
         self.pump_interface.set_pressure(new_target)
         self.last_adjustment_time = current_time
         
-        # In mock mode, simulate pressure increase by updating the mock sensor value
-        if USE_MOCK_HARDWARE and self.pressure_sensor and pressure_diff > 0:
-            # Only update if pressure needs to increase (pressure_diff > 0)
-            self._update_mock_pressure_sensor(new_target)
+        # Do not update mock sensor here: only start_pressure_control sets it once when irrigation
+        # starts. This allows the API (e.g. POST /sensors/mock/set_sensor_value) to set pressure
+        # and have it persist while irrigation is running instead of being overwritten every interval.
         
         return {
             'status': 'adjusted',
@@ -138,9 +142,9 @@ class HydraulicPumpController:
         if not self.pressure_sensor or not hasattr(self.pressure_sensor, 'adc'):
             return
         
-        # Get sensor calibration range
+        # Get sensor calibration range (use config max so we don't clamp to 500 when sensor has old default)
         min_pressure = getattr(self.pressure_sensor, 'min_pressure_kpa', 0.0)
-        max_pressure = getattr(self.pressure_sensor, 'max_pressure_kpa', 500.0)
+        max_pressure = getattr(self.pressure_sensor, 'max_pressure_kpa', MAX_PRESSURE_KPA)
         channel = getattr(self.pressure_sensor, 'channel', None)
         
         if channel is None or not hasattr(self.pressure_sensor.adc, 'use_mock'):
@@ -150,23 +154,31 @@ class HydraulicPumpController:
         if not self.pressure_sensor.adc.use_mock:
             return
         
-        # Convert target pressure to normalized value (0.0 to 1.0)
-        pressure_range = max_pressure - min_pressure
+        # Convert target pressure to normalized value (0.0 to 1.0).
+        # Use effective max >= target so we never clamp to 1.0 and display 500 when target is higher.
+        effective_max = max(max_pressure, target_pressure_kpa, 600.0)
+        pressure_range = effective_max - min_pressure
         if pressure_range > 0:
             normalized_value = (target_pressure_kpa - min_pressure) / pressure_range
-            normalized_value = max(0.0, min(1.0, normalized_value))  # Clamp to 0-1
-            
-            # Update the mock ADC value
+            normalized_value = max(0.0, min(1.0, normalized_value))
+            # Store in ADC; sensor readback uses sensor's own max, so sensor max must be >= 600 (see main.py).
             self.pressure_sensor.adc.set_mock_value(channel, normalized_value)
 
     def get_status(self) -> Dict[str, any]:
         """
         Get pump controller status.
-        
-        Returns:
-            Dictionary with status information
+        Uses pressure_sensor reading when available (so mock/real shows actual pressure),
+        otherwise falls back to pump_interface (target) so UI doesn't show 500 when target is low.
         """
-        current_pressure = self.pump_interface.get_current_pressure()
+        current_pressure = None
+        if self.pressure_sensor:
+            try:
+                data = self.pressure_sensor.read_standardized()
+                current_pressure = data.get('value')
+            except Exception:
+                pass
+        if current_pressure is None:
+            current_pressure = self.pump_interface.get_current_pressure()
         
         return {
             'is_controlling': self.is_controlling,
