@@ -123,13 +123,14 @@ class TankLevelSensor(BaseSensor):
     def read_standardized(self) -> Dict[str, Any]:
         """
         Read and return standardized tank level.
-        
-        Returns:
-            Dictionary with standardized reading data (level in cm and %)
+        API/sensor convention: received 0 = 100 cm (empty tank).
         """
         raw_data = self.read_raw()
         raw_distance_cm = raw_data['value']
-        
+        # Receiving 0 = 100 cm for the sensor (empty tank); some devices send 0 instead of 100
+        if raw_distance_cm == 0:
+            raw_distance_cm = self.empty_distance_cm
+
         # Apply noise filtering
         filtered_distance = self.noise_filter.filter(raw_distance_cm)
 
