@@ -302,15 +302,19 @@ def set_mock_sensor_value():
         "pressure_kpa": 250.0  // kPa
     }
     
-    Tank Level - either fill depth or sensor distance (cm):
+    Tank Level (level_cm or distance_cm):
     {
         "sensor_type": "tank_level",
-        "level_cm": 25.0   // fill depth: 0 = empty, 90 = full
+        "level_cm": 25.0   // 0-90 = fill depth (0 empty, 90 full). 91-100 = sensor distance (100 = empty)
+    }
+    {
+        "sensor_type": "tank_level",
+        "level_cm": 100.0  // 100 = sensor 100 cm = empty tank (accepted)
     }
     or
     {
         "sensor_type": "tank_level",
-        "distance_cm": 55.0  // sensor distance: 10 = full, 100 = empty. Received 0 is treated as 100 cm (empty).
+        "distance_cm": 55.0  // sensor distance: 10 = full, 100 = empty. 0 is treated as 100 cm.
     }
     """
     if not USE_MOCK_HARDWARE:
@@ -416,25 +420,28 @@ def set_mock_sensor_value():
             }), 200
         
         elif sensor_type == 'tank_level':
-            # Tank level: accept level_cm (fill depth) or distance_cm (sensor distance).
-            # Sensor distance: 10 cm = full, 100 cm = empty. Received 0 is treated as 100 cm (empty).
+            # Tank level: accept level_cm or distance_cm.
+            # Sensor distance: 10 cm = full, 100 cm = empty. level_cm > 90 is treated as distance (e.g. 100 = empty).
             fill_range = getattr(sensor, '_fill_range_cm', sensor.empty_distance_cm - sensor.full_distance_cm)
             distance_cm = None
 
             if 'distance_cm' in data:
                 distance_cm = float(data.get('distance_cm'))
-                # API: receiving 0 = 100 cm for the sensor (empty tank)
                 if distance_cm == 0:
                     distance_cm = sensor.empty_distance_cm  # 100 cm
                 distance_cm = max(sensor.full_distance_cm, min(sensor.empty_distance_cm, distance_cm))
             elif 'level_cm' in data:
                 level_cm = float(data.get('level_cm'))
-                if level_cm < 0 or level_cm > fill_range:
+                if level_cm < 0:
                     return jsonify({
                         'success': False,
-                        'error': f'level_cm (fill depth) must be between 0 and {fill_range} cm'
+                        'error': 'level_cm must be >= 0'
                     }), 400
-                distance_cm = sensor.empty_distance_cm - level_cm
+                # level_cm in (90, 100] = sensor distance (e.g. 100 = empty). level_cm in [0, 90] = fill depth.
+                if level_cm > fill_range:
+                    distance_cm = max(sensor.full_distance_cm, min(sensor.empty_distance_cm, level_cm))
+                else:
+                    distance_cm = sensor.empty_distance_cm - level_cm
             else:
                 return jsonify({
                     'success': False,
