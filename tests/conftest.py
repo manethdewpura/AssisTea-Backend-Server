@@ -112,11 +112,13 @@ def mock_pressure_sensors(mock_adc):
 
 @pytest.fixture
 def mock_tank_level_sensor(mock_gpio):
-    """Create a mock tank level sensor."""
+    """Create a mock tank level sensor (100cm = empty, 10cm = full)."""
     sensor = TankLevelSensor(
         'tank_level_1', mock_gpio,
         DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
-        tank_height_cm=50.0
+        tank_height_cm=50.0,
+        empty_distance_cm=100.0,
+        full_distance_cm=10.0
     )
     return sensor
 

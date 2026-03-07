@@ -411,45 +411,37 @@ def set_mock_sensor_value():
             }), 200
         
         elif sensor_type == 'tank_level':
-            # Tank level sensor - expects level_cm
+            # Tank level sensor - level_cm = fill depth (0 = empty, fill_range = full)
+            # Sensor measures distance: empty_distance_cm = empty, full_distance_cm = full
             level_cm = data.get('level_cm')
             if level_cm is None:
                 return jsonify({
                     'success': False,
                     'error': 'level_cm is required for tank level sensor'
                 }), 400
-            
+
+            fill_range = getattr(sensor, '_fill_range_cm', sensor.empty_distance_cm - sensor.full_distance_cm)
             level_cm = float(level_cm)
-            if level_cm < 0 or level_cm > sensor.tank_height_cm:
+            if level_cm < 0 or level_cm > fill_range:
                 return jsonify({
                     'success': False,
-                    'error': f'level_cm must be between 0 and {sensor.tank_height_cm} cm'
+                    'error': f'level_cm (fill depth) must be between 0 and {fill_range} cm'
                 }), 400
-            
-            # Convert level to distance (ultrasonic sensor measures distance, not level)
-            # Distance = tank_height - level
-            distance_cm = sensor.tank_height_cm - level_cm
-            
-            # For ultrasonic sensor, we need to simulate the timing
-            # Speed of sound = 343 m/s = 0.0343 cm/μs
-            # pulse_duration = (distance * 2) / 34300
-            # This is complex, so we'll set a GPIO analog value that approximates it
-            # For simplicity, we'll use a normalized value based on distance
-            # Max distance = tank_height, so normalized = distance / tank_height
-            normalized = distance_cm / sensor.tank_height_cm if sensor.tank_height_cm > 0 else 0.5
-            
-            # Note: Tank level sensor uses GPIO pins, not ADC
-            # We'll need to set the analog value on the echo pin
-            # This is a simplified approach - in reality, ultrasonic timing is more complex
+
+            # Convert fill depth to distance: distance = empty - level_cm
+            distance_cm = sensor.empty_distance_cm - level_cm
+            # Mock: normalized 0 = full (low distance), 1 = empty (high distance)
+            normalized = (distance_cm - sensor.full_distance_cm) / fill_range if fill_range > 0 else 0.5
+
             gpio_instance.set_analog_value(sensor.echo_pin, normalized)
-            
+
             return jsonify({
                 'success': True,
-                'message': f'Tank level set to {level_cm:.1f} cm',
+                'message': f'Tank level set to {level_cm:.1f} cm fill depth',
                 'sensor_type': sensor_type,
                 'level_cm': level_cm,
-                'level_percent': (level_cm / sensor.tank_height_cm * 100) if sensor.tank_height_cm > 0 else 0,
-                'note': 'Tank level simulation is simplified - actual ultrasonic timing is more complex'
+                'level_percent': (level_cm / fill_range * 100) if fill_range > 0 else 0,
+                'note': 'Tank level simulation: level_cm = fill depth (0 = empty, {} = full)'.format(int(fill_range))
             }), 200
         
         else:

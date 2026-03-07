@@ -9,25 +9,35 @@ from app.utils.unit_converter import UnitConverter
 
 
 class TankLevelSensor(BaseSensor):
-    """HY-SR05 ultrasonic tank level sensor."""
+    """HY-SR05 ultrasonic tank level sensor.
+    Sensor measures distance to water surface: high cm = empty, low cm = full.
+    Calibration: empty_distance_cm (e.g. 100) = empty tank, full_distance_cm (e.g. 10) = full tank.
+    """
 
     def __init__(self, sensor_id: str, gpio: GPIOInterface, trigger_pin: int, echo_pin: int,
-                 tank_height_cm: float = 50.0):
+                 tank_height_cm: float = 50.0,
+                 empty_distance_cm: float = 100.0,
+                 full_distance_cm: float = 10.0):
         """
         Initialize tank level sensor.
-        
+
         Args:
             sensor_id: Unique sensor identifier
             gpio: GPIO interface instance
             trigger_pin: GPIO pin for trigger signal
             echo_pin: GPIO pin for echo signal
-            tank_height_cm: Height of tank in cm
+            tank_height_cm: Height of tank in cm (kept for backward compatibility / mock scaling)
+            empty_distance_cm: Sensor distance reading when tank is empty (e.g. 100 cm)
+            full_distance_cm: Sensor distance reading when tank is full (e.g. 10 cm)
         """
         super().__init__(sensor_id, zone_id=None)  # Tank is system-wide
         self.gpio = gpio
         self.trigger_pin = trigger_pin
         self.echo_pin = echo_pin
         self.tank_height_cm = tank_height_cm
+        self.empty_distance_cm = empty_distance_cm
+        self.full_distance_cm = full_distance_cm
+        self._fill_range_cm = max(0.0, empty_distance_cm - full_distance_cm)
         self.noise_filter = NoiseFilter(window_size=3)
         self.unit_converter = UnitConverter()
         
@@ -52,7 +62,8 @@ class TankLevelSensor(BaseSensor):
         if is_mock_gpio and hasattr(self.gpio, 'read_analog'):
             try:
                 normalized = self.gpio.read_analog(self.echo_pin)
-                distance_cm = normalized * self.tank_height_cm
+                # normalized 0 = full (low distance), 1 = empty (high distance)
+                distance_cm = self.full_distance_cm + normalized * self._fill_range_cm
                 return distance_cm
             except Exception:
                 pass
@@ -121,17 +132,19 @@ class TankLevelSensor(BaseSensor):
         
         # Apply noise filtering
         filtered_distance = self.noise_filter.filter(raw_distance_cm)
-        
-        # Calculate level (distance from sensor to liquid surface)
-        # Level = tank_height - distance
-        level_cm = max(0.0, self.tank_height_cm - filtered_distance)
-        
-        # Calculate percentage
-        level_percent = (level_cm / self.tank_height_cm) * 100.0 if self.tank_height_cm > 0 else 0.0
+
+        # Invert: sensor distance high = empty, low = full.
+        # Fill depth (cm) = empty_distance - distance, clamped to [0, fill_range]
+        fill_depth_cm = self.empty_distance_cm - filtered_distance
+        fill_depth_cm = max(0.0, min(self._fill_range_cm, fill_depth_cm))
+
+        # Fill percentage (0% = empty, 100% = full)
+        level_percent = (fill_depth_cm / self._fill_range_cm * 100.0) if self._fill_range_cm > 0 else 0.0
         level_percent = max(0.0, min(100.0, level_percent))
-        
+
+        # value = fill depth in cm (for fertigation / API); raw_value = sensor distance
         reading = {
-            'value': level_cm,
+            'value': fill_depth_cm,
             'unit': 'cm',
             'value_percent': level_percent,
             'raw_value': raw_distance_cm,
