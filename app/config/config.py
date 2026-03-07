@@ -38,6 +38,9 @@ ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(
 # Sensor pins (for digital sensors and tank level)
 DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '22'))  # Tank level sensor trigger (TRIG)
 DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo (ECHO)
+# Ultrasonic measures distance to water: high distance = empty, low distance = full
+TANK_EMPTY_DISTANCE_CM = float(os.getenv('TANK_EMPTY_DISTANCE_CM', '100.0'))  # Sensor reading when tank is empty (cm)
+TANK_FULL_DISTANCE_CM = float(os.getenv('TANK_FULL_DISTANCE_CM', '10.0'))  # Sensor reading when tank is full (cm)
 
 # Zone Configuration (hardcoded - single zone system)
 ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin for zone valve control

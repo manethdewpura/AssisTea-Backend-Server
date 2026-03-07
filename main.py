@@ -52,7 +52,8 @@ from app.hardware.tank_valve_controller import TankValveController
 from app.config.config import (
     IRRIGATION_PUMP_GPIO_PIN, FERTILIZER_PUMP_GPIO_PIN, IRRIGATION_PUMP_SOLENOID_PIN,
     TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
-    DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
+    DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
+    TANK_EMPTY_DISTANCE_CM, TANK_FULL_DISTANCE_CM
 )
 
 # Initialize ML background task (checks for stale data every 30 minutes)
@@ -137,7 +138,9 @@ logging.info("✓ Irrigation pressure sensor initialized (system-wide)")
 fertilizer_pressure_sensor = PressureSensor('pressure_fertilizer', adc, ADS1115_FERTILIZER_PRESSURE_CHANNEL, zone_id=None)  # A3 for fertilizer pump
 logging.info("✓ Fertilizer pressure sensor initialized (system-wide)")
 tank_level_sensor = TankLevelSensor(
-    'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
+    'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
+    empty_distance_cm=TANK_EMPTY_DISTANCE_CM,
+    full_distance_cm=TANK_FULL_DISTANCE_CM
 )
 weather_reader = WeatherReader(app=app)
 
