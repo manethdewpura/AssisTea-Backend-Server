@@ -51,6 +51,7 @@ from app.hardware.valve_interface import SolenoidValveController
 from app.hardware.tank_valve_controller import TankValveController
 from app.config.config import (
     IRRIGATION_PUMP_GPIO_PIN, FERTILIZER_PUMP_GPIO_PIN, IRRIGATION_PUMP_SOLENOID_PIN,
+    FERTILIZER_PUMP_SOLENOID_PIN,
     TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
     DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
     TANK_EMPTY_DISTANCE_CM, TANK_FULL_DISTANCE_CM
@@ -76,8 +77,11 @@ fertilizer_pump_controller_hw = SimplePumpController(gpio, FERTILIZER_PUMP_GPIO_
 
 # Initialize irrigation pump solenoid valve with state manager
 from app.hardware.irrigation_pump_solenoid import IrrigationPumpSolenoid
+from app.hardware.fertilizer_pump_solenoid import FertilizerPumpSolenoid
 irrigation_pump_solenoid = IrrigationPumpSolenoid(gpio, IRRIGATION_PUMP_SOLENOID_PIN, solenoid_state_manager)
 logging.info("✓ Irrigation pump solenoid initialized with state persistence")
+fertilizer_pump_solenoid = FertilizerPumpSolenoid(gpio, FERTILIZER_PUMP_SOLENOID_PIN, solenoid_state_manager)
+logging.info("✓ Fertilizer pump solenoid initialized with state persistence")
 
 # Initialize tank valves with state manager
 tank_valve_controller = TankValveController(
@@ -201,7 +205,8 @@ fertigation_controller = FertigationController(
     pressure_sensor=fertilizer_pressure_sensor,  # A3 pressure sensor for fertilizer pump
     fertilizer_pump_controller=fertilizer_pump_controller,  # Fertilizer pump (GPIO 22)
     irrigation_pump_controller=irrigation_pump_controller,  # Irrigation pump (GPIO 23)
-    irrigation_pump_solenoid=irrigation_pump_solenoid  # Irrigation pump solenoid (GPIO 24)
+    irrigation_pump_solenoid=irrigation_pump_solenoid,  # Irrigation pump solenoid (GPIO 24)
+    fertilizer_pump_solenoid=fertilizer_pump_solenoid  # Fertilizer pump solenoid (opens with tank outlet)
 )
 
 # Initialize fail-safe mechanisms
