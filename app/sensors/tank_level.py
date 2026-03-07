@@ -122,41 +122,32 @@ class TankLevelSensor(BaseSensor):
 
     def read_standardized(self) -> Dict[str, Any]:
         """
-        Read and return standardized tank level.
-        API/sensor convention: received 0 = 100 cm (empty tank).
+        Read and return tank level. Single convention: 10 cm = 100% full, 100 cm = 0% empty.
+        value = sensor distance in cm (10-100). value_percent = (100 - distance) / 90 * 100.
         """
         raw_data = self.read_raw()
-        raw_distance_cm = raw_data['value']
-        # Receiving 0 = 100 cm for the sensor (empty tank); some devices send 0 instead of 100
-        if raw_distance_cm == 0:
-            raw_distance_cm = self.empty_distance_cm
+        distance_cm = raw_data['value']
+        if distance_cm == 0:
+            distance_cm = self.empty_distance_cm  # 100 cm
 
-        # Apply noise filtering
-        filtered_distance = self.noise_filter.filter(raw_distance_cm)
+        filtered_distance = self.noise_filter.filter(distance_cm)
+        distance_cm = max(self.full_distance_cm, min(self.empty_distance_cm, filtered_distance))
 
-        # Invert: sensor distance high = empty, low = full.
-        # Fill depth (cm) = empty_distance - distance, clamped to [0, fill_range]
-        fill_depth_cm = self.empty_distance_cm - filtered_distance
-        fill_depth_cm = max(0.0, min(self._fill_range_cm, fill_depth_cm))
-
-        # Fill percentage (0% = empty, 100% = full)
-        level_percent = (fill_depth_cm / self._fill_range_cm * 100.0) if self._fill_range_cm > 0 else 0.0
+        # 10 cm = 100%, 100 cm = 0%
+        level_percent = ((self.empty_distance_cm - distance_cm) / self._fill_range_cm * 100.0) if self._fill_range_cm > 0 else 0.0
         level_percent = max(0.0, min(100.0, level_percent))
 
-        # value = fill depth in cm (for fertigation / API); raw_value = sensor distance
         reading = {
-            'value': fill_depth_cm,
+            'value': distance_cm,
             'unit': 'cm',
             'value_percent': level_percent,
-            'raw_value': raw_distance_cm,
+            'raw_value': distance_cm,
             'raw_unit': 'cm',
             'timestamp': datetime.now(),
             'sensor_id': self.sensor_id,
             'zone_id': self.zone_id
         }
-        
         self.last_reading = reading
         self.last_reading_time = datetime.now()
-        
         return reading
 

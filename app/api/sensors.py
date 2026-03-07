@@ -302,19 +302,10 @@ def set_mock_sensor_value():
         "pressure_kpa": 250.0  // kPa
     }
     
-    Tank Level (level_cm or distance_cm):
+    Tank Level (sensor distance only; 10 cm = 100% full, 100 cm = 0% empty):
     {
         "sensor_type": "tank_level",
-        "level_cm": 25.0   // 0-90 = fill depth (0 empty, 90 full). 91-100 = sensor distance (100 = empty)
-    }
-    {
-        "sensor_type": "tank_level",
-        "level_cm": 100.0  // 100 = sensor 100 cm = empty tank (accepted)
-    }
-    or
-    {
-        "sensor_type": "tank_level",
-        "distance_cm": 55.0  // sensor distance: 10 = full, 100 = empty. 0 is treated as 100 cm.
+        "level_cm": 55.0   // sensor distance in cm (10-100). 0 is treated as 100 cm (empty).
     }
     """
     if not USE_MOCK_HARDWARE:
@@ -420,48 +411,34 @@ def set_mock_sensor_value():
             }), 200
         
         elif sensor_type == 'tank_level':
-            # Tank level: accept level_cm or distance_cm.
-            # Sensor distance: 10 cm = full, 100 cm = empty. level_cm > 90 is treated as distance (e.g. 100 = empty).
+            # Only convention: 10 cm = 100% full, 100 cm = 0% empty. Accept level_cm = sensor distance (10-100).
             fill_range = getattr(sensor, '_fill_range_cm', sensor.empty_distance_cm - sensor.full_distance_cm)
-            distance_cm = None
-
-            if 'distance_cm' in data:
-                distance_cm = float(data.get('distance_cm'))
-                if distance_cm == 0:
-                    distance_cm = sensor.empty_distance_cm  # 100 cm
-                distance_cm = max(sensor.full_distance_cm, min(sensor.empty_distance_cm, distance_cm))
-            elif 'level_cm' in data:
-                level_cm = float(data.get('level_cm'))
-                if level_cm < 0:
-                    return jsonify({
-                        'success': False,
-                        'error': 'level_cm must be >= 0'
-                    }), 400
-                # level_cm in (90, 100] = sensor distance (e.g. 100 = empty). level_cm in [0, 90] = fill depth.
-                if level_cm > fill_range:
-                    distance_cm = max(sensor.full_distance_cm, min(sensor.empty_distance_cm, level_cm))
-                else:
-                    distance_cm = sensor.empty_distance_cm - level_cm
-            else:
+            level_cm = data.get('level_cm')
+            if level_cm is None:
                 return jsonify({
                     'success': False,
-                    'error': 'level_cm or distance_cm is required for tank level sensor'
+                    'error': 'level_cm is required (sensor distance in cm: 10 = full, 100 = empty)'
+                }), 400
+            distance_cm = float(level_cm)
+            if distance_cm == 0:
+                distance_cm = sensor.empty_distance_cm  # 100 cm
+            if distance_cm < sensor.full_distance_cm or distance_cm > sensor.empty_distance_cm:
+                return jsonify({
+                    'success': False,
+                    'error': f'level_cm must be between {sensor.full_distance_cm} and {sensor.empty_distance_cm} cm (10 = 100%%, 100 = 0%%)'
                 }), 400
 
-            # Mock: normalized 0 = full (low distance), 1 = empty (high distance)
             normalized = (distance_cm - sensor.full_distance_cm) / fill_range if fill_range > 0 else 0.5
             gpio_instance.set_analog_value(sensor.echo_pin, normalized)
 
-            level_cm = sensor.empty_distance_cm - distance_cm
-            level_percent = (level_cm / fill_range * 100) if fill_range > 0 else 0
+            level_percent = ((sensor.empty_distance_cm - distance_cm) / fill_range * 100) if fill_range > 0 else 0
             return jsonify({
                 'success': True,
-                'message': f'Tank level set (sensor distance {distance_cm:.1f} cm)',
+                'message': f'Tank level set: {distance_cm:.1f} cm ({level_percent:.0f}%%)',
                 'sensor_type': sensor_type,
-                'distance_cm': distance_cm,
-                'level_cm': level_cm,
-                'level_percent': level_percent,
-                'note': 'Sensor: 10 cm = full, 100 cm = empty. Received 0 is treated as 100 cm.'
+                'value': distance_cm,
+                'value_percent': level_percent,
+                'note': '10 cm = 100%%, 100 cm = 0%%.'
             }), 200
         
         else:
