@@ -9,4 +9,3 @@ User=assistea
 Environment=BRANCH=main
 Environment=RECIPIENTS="dewpuramaneth@gmail.com ridmirupasinghe228@gmail.com
 ExecStart=/home/assistea/AssisTea-Backend-Server/deploy/auto_update.sh
-ExecStartPost=+/bin/systemctl restart assistea.service

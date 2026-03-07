@@ -45,6 +45,13 @@ if [[ "$LOCAL_HASH" != "$REMOTE_HASH" ]]; then
   else
     log "Email skipped (set RECIPIENTS + ~/.msmtprc + msmtp to enable)."
   fi
+
+  SERVICE_NAME="${SERVICE_NAME:-assistea.service}"
+  if sudo -n systemctl restart "$SERVICE_NAME" >> "$LOG_FILE" 2>&1; then
+    log "Service '$SERVICE_NAME' restarted."
+  else
+    log "ERROR: failed to restart '$SERVICE_NAME' (configure sudoers for non-interactive restart)"
+  fi
 else
   log "No new commit."
 fi
