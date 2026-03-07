@@ -45,21 +45,20 @@ class TankLevelSensor(BaseSensor):
         Returns:
             Distance in cm
         """
-        # Check if we're using mock GPIO (for testing)
-        # In mock mode, read distance directly from analog value
-        if hasattr(self.gpio, 'read_analog'):
+        # Only use analog path for MockGPIO (development). Real GPIO must use
+        # pulse timing; RealGPIO.read_analog is digital 0/1 only, so a disconnected
+        # echo pin would yield a fake "valid" reading and sensor would stay healthy.
+        is_mock_gpio = type(self.gpio).__name__ == 'MockGPIO'
+        if is_mock_gpio and hasattr(self.gpio, 'read_analog'):
             try:
-                # Read normalized analog value (0.0-1.0) representing distance
                 normalized = self.gpio.read_analog(self.echo_pin)
-                # Convert normalized value to distance in cm
-                # normalized = 0.0 means distance = 0, normalized = 1.0 means distance = tank_height
                 distance_cm = normalized * self.tank_height_cm
                 return distance_cm
-            except:
-                # Fall back to digital pin reading if analog read fails
+            except Exception:
                 pass
         
-        # Real hardware or fallback: use digital pin timing method
+        # Real hardware: use digital echo pulse timing (HY-SR05). Disconnected
+        # sensor will timeout here and raise, so health is marked unhealthy.
         # Send trigger pulse (10 microseconds)
         self.gpio.write_pin(self.trigger_pin, True)
         time.sleep(0.00001)  # 10 microseconds
