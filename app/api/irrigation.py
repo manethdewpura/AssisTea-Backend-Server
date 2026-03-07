@@ -57,7 +57,8 @@ def start_irrigation():
             'base_pressure': cfg.get('zone_base_pressure_kpa'),
         }
         
-        result = irrigation_ctrl.start_irrigation(ZONE_ID, zone_config)
+        skip_weather_check = bool(data.get('skip_weather_check', False))
+        result = irrigation_ctrl.start_irrigation(ZONE_ID, zone_config, skip_weather_check=skip_weather_check)
         
         if result['success']:
             return jsonify(result), 200
