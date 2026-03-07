@@ -13,7 +13,7 @@ from app.sensors.pressure import PressureSensor
 from app.sensors.weather import WeatherReader
 from app.config.config import (
     TANK_EMPTY_DISTANCE_CM, TANK_FULL_DISTANCE_CM, MAX_OPERATION_DURATION_SEC,
-    PUMP_PRESSURE_TOLERANCE_KPA
+    PUMP_PRESSURE_TOLERANCE_KPA, PRESSURE_OVERPRESSURE_STOP_PERCENT,
 )
 from app.models.operational_log import OperationalLog, OperationType, OperationStatus
 from app.models.system_log import SystemLog, LogLevel
@@ -226,13 +226,22 @@ class FertigationController:
                         try:
                             pressure_data = self.pressure_sensor.read_standardized()
                             current_pressure = pressure_data['value']
+                            target_pressure = self.fertilizer_pump_controller.target_pressure_kpa
+                            
+                            # Stop fertigation if pressure exceeds target by configured percent
+                            if target_pressure > 0:
+                                overpressure_limit = target_pressure * (1.0 + PRESSURE_OVERPRESSURE_STOP_PERCENT / 100.0)
+                                if current_pressure > overpressure_limit:
+                                    self._log_system(LogLevel.WARNING, 'fertigation_controller',
+                                                    f'Over-pressure stop: {current_pressure:.1f} kPa exceeds limit '
+                                                    f'({overpressure_limit:.1f} kPa, target + {PRESSURE_OVERPRESSURE_STOP_PERCENT}%)')
+                                    break
                             
                             # Maintain pump pressure
                             self.fertilizer_pump_controller.maintain_pressure(current_pressure)
                             
                             # Log pressure if outside tolerance
                             if self.fertilizer_pump_controller.is_controlling:
-                                target_pressure = self.fertilizer_pump_controller.target_pressure_kpa
                                 if abs(current_pressure - target_pressure) > PUMP_PRESSURE_TOLERANCE_KPA:
                                     self._log_system(LogLevel.WARNING, 'fertigation_controller',
                                                    f'Fertilizer pump pressure deviation: {current_pressure:.1f} kPa (target: {target_pressure:.1f} kPa)')
