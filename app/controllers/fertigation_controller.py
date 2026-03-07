@@ -150,11 +150,11 @@ class FertigationController:
             while time.time() - fill_start_time < fill_timeout:
                 try:
                     level_data = self.tank_level_sensor.read_standardized()
-                    distance_cm = level_data.get('raw_value', level_data['value'])
-                    # Tank full when sensor distance <= TANK_FULL_DISTANCE_CM (10 cm)
+                    distance_cm = level_data['value']  # 10 cm = full, 100 cm = empty
                     if distance_cm <= TANK_FULL_DISTANCE_CM + tolerance_cm:
                         tank_filled = True
-                        initial_tank_level = level_data.get('value')
+                        # Fill depth for volume calc: empty - distance
+                        initial_tank_level = TANK_EMPTY_DISTANCE_CM - distance_cm
                         self._log_system(LogLevel.INFO, 'fertigation_controller',
                                        f'Tank full (sensor {distance_cm:.1f} cm)')
                         break
@@ -244,8 +244,7 @@ class FertigationController:
                 
                 try:
                     level_data = self.tank_level_sensor.read_standardized()
-                    distance_cm = level_data.get('raw_value', level_data['value'])
-                    # Tank empty when sensor distance >= TANK_EMPTY_DISTANCE_CM (100 cm)
+                    distance_cm = level_data['value']  # 10 cm = full, 100 cm = empty
                     if distance_cm >= TANK_EMPTY_DISTANCE_CM - tolerance_cm:
                         self._log_system(LogLevel.INFO, 'fertigation_controller',
                                        f'Tank empty (sensor {distance_cm:.1f} cm)')
@@ -321,11 +320,11 @@ class FertigationController:
         self.tank_valve_controller.close_all()
         self.valve_controller.close_zone(zone_id)
         
-        # Get final tank level (fill depth; 0 when empty)
+        # Get final tank level as fill depth for volume (value = distance; fill = empty - distance)
         final_tank_level = 0.0
         try:
             level_data = self.tank_level_sensor.read_standardized()
-            final_tank_level = level_data['value']
+            final_tank_level = TANK_EMPTY_DISTANCE_CM - level_data['value']
         except:
             pass
         
@@ -352,11 +351,11 @@ class FertigationController:
         self.is_running = False
         
         if self.current_zone:
-            # Get initial tank level for logging (fill depth; full = empty_dist - full_dist)
-            initial_level = TANK_EMPTY_DISTANCE_CM - TANK_FULL_DISTANCE_CM
+            # Fill depth for logging (value = distance; fill = empty - distance)
+            initial_level = 0.0
             try:
                 level_data = self.tank_level_sensor.read_standardized()
-                initial_level = level_data['value']
+                initial_level = TANK_EMPTY_DISTANCE_CM - level_data['value']
             except:
                 pass
             

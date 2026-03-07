@@ -87,14 +87,10 @@ class DataValidator:
         return True, None
 
     def validate_tank_level(self, value_cm: float, sensor_id: str) -> Tuple[bool, Optional[str]]:
-        """
-        Validate tank level reading (fill depth in cm: 0 = empty, empty_dist - full_dist = full).
-        """
-        min_fill = 0.0
-        max_fill = TANK_EMPTY_DISTANCE_CM - TANK_FULL_DISTANCE_CM  # e.g. 90 cm at 100% full
+        """Validate tank level: sensor distance in cm (10 = 100% full, 100 = 0% empty)."""
         margin = 5.0
-        if value_cm < min_fill - margin or value_cm > max_fill + margin:
-            return False, f"Tank level {value_cm} cm outside expected range [{min_fill - margin}, {max_fill + margin}] cm"
+        if value_cm < TANK_FULL_DISTANCE_CM - margin or value_cm > TANK_EMPTY_DISTANCE_CM + margin:
+            return False, f"Tank level {value_cm} cm outside expected range [{TANK_FULL_DISTANCE_CM}, {TANK_EMPTY_DISTANCE_CM}] cm (10 = 100%%, 100 = 0%%)"
         return True, None
 
     def validate_range(self, value: float, min_value: float, max_value: float, 
