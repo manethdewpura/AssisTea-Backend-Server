@@ -12,7 +12,7 @@ from app.sensors.weather import WeatherReader
 from app.sensors.pressure import PressureSensor
 from app.config.config import (
     ADEQUATE_SOIL_MOISTURE_PERCENT, MOISTURE_CHECK_INTERVAL_SEC,
-    MAX_OPERATION_DURATION_SEC
+    MAX_OPERATION_DURATION_SEC, PRESSURE_OVERPRESSURE_STOP_PERCENT,
 )
 from app.utils.system_config_helper import load_system_config
 from app.models.operational_log import OperationalLog, OperationType, OperationStatus
@@ -251,6 +251,15 @@ class IrrigationController:
                         current_pressure = pressure_data['value']
                     except:
                         pass
+                
+                # Stop irrigation if pressure exceeds calculated target by configured percent
+                if current_pressure is not None and target_pressure > 0:
+                    overpressure_limit = target_pressure * (1.0 + PRESSURE_OVERPRESSURE_STOP_PERCENT / 100.0)
+                    if current_pressure > overpressure_limit:
+                        self._log_system(LogLevel.WARNING, 'irrigation_controller',
+                                        f'Over-pressure stop: {current_pressure:.1f} kPa exceeds limit '
+                                        f'({overpressure_limit:.1f} kPa, target + {PRESSURE_OVERPRESSURE_STOP_PERCENT}%)')
+                        break
                 
                 self.pump_controller.maintain_pressure(current_pressure)
                 

@@ -95,6 +95,8 @@ PRESSURE_SAFETY_MARGIN_PERCENT = float(os.getenv('PRESSURE_SAFETY_MARGIN_PERCENT
 # Pump control
 PUMP_PRESSURE_TOLERANCE_KPA = float(os.getenv('PUMP_PRESSURE_TOLERANCE_KPA', '10.0'))
 PUMP_ADJUSTMENT_INTERVAL_SEC = float(os.getenv('PUMP_ADJUSTMENT_INTERVAL_SEC', '2.0'))
+# Stop irrigation/fertigation if measured pressure exceeds calculated (target) pressure by this percent
+PRESSURE_OVERPRESSURE_STOP_PERCENT = float(os.getenv('PRESSURE_OVERPRESSURE_STOP_PERCENT', '10.0'))
 
 # Sensor reading intervals
 SENSOR_READ_INTERVAL_SEC = float(os.getenv('SENSOR_READ_INTERVAL_SEC', '5.0'))
