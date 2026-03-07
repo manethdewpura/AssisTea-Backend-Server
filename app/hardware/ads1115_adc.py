@@ -36,6 +36,7 @@ class ADS1115ADC:
         self.use_mock = use_mock or not ADS1115_AVAILABLE
         self.ads = None
         self.channels = {}  # channel -> AnalogIn object
+        self._device_unavailable = False  # Set True if real device fails (e.g. disconnected)
         
         if not self.use_mock:
             try:
@@ -100,17 +101,26 @@ class ADS1115ADC:
             
         Returns:
             Normalized value between 0.0 and 1.0
+            
+        Raises:
+            OSError: If real device is disconnected or I2C read fails
         """
-        analog_in = self.get_channel(channel)
-        
         if self.use_mock:
             return self.mock_values[channel]
         
-        # ADS1115 has ±4.096V range, normalize to 0-1
-        # Assuming sensor outputs 0-3.3V (typical for Raspberry Pi)
-        voltage = analog_in.voltage
-        normalized = voltage / 3.3  # Normalize to 0-1 range
-        return max(0.0, min(1.0, normalized))
+        if self._device_unavailable:
+            raise OSError("ADS1115 device unavailable (disconnected or not responding)")
+        
+        analog_in = self.get_channel(channel)
+        try:
+            # ADS1115 has ±4.096V range, normalize to 0-1
+            # Assuming sensor outputs 0-3.3V (typical for Raspberry Pi)
+            voltage = analog_in.voltage
+            normalized = voltage / 3.3  # Normalize to 0-1 range
+            return max(0.0, min(1.0, normalized))
+        except (OSError, RuntimeError) as e:
+            self._device_unavailable = True
+            raise OSError(f"ADS1115 read failed (device may be disconnected): {e}") from e
 
     def set_mock_value(self, channel: int, value: float):
         """
