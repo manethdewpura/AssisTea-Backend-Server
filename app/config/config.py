@@ -20,6 +20,7 @@ USE_MOCK_HARDWARE = not IS_RASPBERRY_PI or os.getenv('USE_MOCK_HARDWARE', 'false
 IRRIGATION_PUMP_GPIO_PIN = int(os.getenv('IRRIGATION_PUMP_GPIO_PIN', '23'))  # Irrigation pump motor
 FERTILIZER_PUMP_GPIO_PIN = int(os.getenv('FERTILIZER_PUMP_GPIO_PIN', '22'))  # Fertilizer pump motor
 IRRIGATION_PUMP_SOLENOID_PIN = int(os.getenv('IRRIGATION_PUMP_SOLENOID_PIN', '24'))  # Irrigation pump solenoid valve
+FERTILIZER_PUMP_SOLENOID_PIN = int(os.getenv('FERTILIZER_PUMP_SOLENOID_PIN', '21'))  # Fertilizer pump solenoid (open with tank outlet)
 
 # Fertilizer tank solenoids
 TANK_INLET_SOLENOID_PIN = int(os.getenv('TANK_INLET_SOLENOID_PIN', '25'))  # Tank inlet solenoid
@@ -38,6 +39,10 @@ ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(
 # Sensor pins (for digital sensors and tank level)
 DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '22'))  # Tank level sensor trigger (TRIG)
 DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo (ECHO)
+# Tank level: ultrasonic sensor measures distance to water surface (cm)
+# Tank full  -> sensor reads 10 cm (water close). Tank empty -> sensor reads 100 cm (water far).
+TANK_EMPTY_DISTANCE_CM = float(os.getenv('TANK_EMPTY_DISTANCE_CM', '100.0'))  # Sensor reading when tank is empty (cm)
+TANK_FULL_DISTANCE_CM = float(os.getenv('TANK_FULL_DISTANCE_CM', '10.0'))  # Sensor reading when tank is full (cm)
 
 # Zone Configuration (hardcoded - single zone system)
 ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin for zone valve control
@@ -61,19 +66,38 @@ MAX_SOIL_MOISTURE_PERCENT = float(os.getenv('MAX_SOIL_MOISTURE_PERCENT', '100.0'
 ADEQUATE_SOIL_MOISTURE_PERCENT = float(os.getenv('ADEQUATE_SOIL_MOISTURE_PERCENT', '60.0'))
 
 MIN_PRESSURE_KPA = float(os.getenv('MIN_PRESSURE_KPA', '100.0'))
-MAX_PRESSURE_KPA = float(os.getenv('MAX_PRESSURE_KPA', '500.0'))
+# Default 600 allows mock to display calculated target pressure (e.g. ~548 kPa) instead of capping at 500
+MAX_PRESSURE_KPA = float(os.getenv('MAX_PRESSURE_KPA', '600.0'))
 
-TANK_EMPTY_LEVEL_CM = float(os.getenv('TANK_EMPTY_LEVEL_CM', '5.0'))
-TANK_FULL_LEVEL_CM = float(os.getenv('TANK_FULL_LEVEL_CM', '50.0'))
+# Hydraulic constants (for realistic pressure calculations)
+WATER_DENSITY_KG_PER_M3 = 1000.0  # kg/m³ (fresh water at ~20°C)
+GRAVITY_M_PER_S2 = 9.81  # m/s²
 
-# Hydraulic constants
-WATER_DENSITY_KG_PER_M3 = 1000.0
-GRAVITY_M_PER_S2 = 9.81
-PRESSURE_LOSS_PER_DEGREE_SLOPE_KPA = float(os.getenv('PRESSURE_LOSS_PER_DEGREE_SLOPE_KPA', '2.5'))
+# Dynamic viscosity of water (for Reynolds number / Darcy friction factor)
+# μ ≈ 1.0e-3 Pa·s at ~20°C
+WATER_DYNAMIC_VISCOSITY_PA_S = float(os.getenv('WATER_DYNAMIC_VISCOSITY_PA_S', '0.001'))
+
+# Pipe / hydraulic geometry for main irrigation line
+# These are engineering estimates and should be tuned per installation.
+PIPE_LENGTH_M = float(os.getenv('PIPE_LENGTH_M', '50.0'))  # Total pipe run [m]
+PIPE_DIAMETER_M = float(os.getenv('PIPE_DIAMETER_M', '0.050'))  # Internal diameter [m] (e.g. 50 mm)
+ESTIMATED_FLOW_RATE_M3_PER_S = float(os.getenv('ESTIMATED_FLOW_RATE_M3_PER_S', '0.001'))  # m³/s
+
+# Darcy–Weisbach friction factor.
+# If <= 0, the system will estimate f from Reynolds number (laminar / turbulent).
+DARCY_FRICTION_FACTOR = float(os.getenv('DARCY_FRICTION_FACTOR', '0.0'))
+
+# Aggregate minor loss coefficient K (dimensionless) for fittings, bends, valves, etc.
+MINOR_LOSS_COEFFICIENT_K = float(os.getenv('MINOR_LOSS_COEFFICIENT_K', '5.0'))
+
+# Configurable safety margin applied on top of the calculated required pressure.
+PRESSURE_SAFETY_MARGIN_PERCENT = float(os.getenv('PRESSURE_SAFETY_MARGIN_PERCENT', '10.0'))
 
 # Pump control
 PUMP_PRESSURE_TOLERANCE_KPA = float(os.getenv('PUMP_PRESSURE_TOLERANCE_KPA', '10.0'))
 PUMP_ADJUSTMENT_INTERVAL_SEC = float(os.getenv('PUMP_ADJUSTMENT_INTERVAL_SEC', '2.0'))
+# Stop irrigation/fertigation if measured pressure exceeds calculated (target) pressure by this percent
+PRESSURE_OVERPRESSURE_STOP_PERCENT = float(os.getenv('PRESSURE_OVERPRESSURE_STOP_PERCENT', '10.0'))
 
 # Sensor reading intervals
 SENSOR_READ_INTERVAL_SEC = float(os.getenv('SENSOR_READ_INTERVAL_SEC', '5.0'))

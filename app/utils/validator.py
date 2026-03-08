@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 from app.config.config import (
     MIN_SOIL_MOISTURE_PERCENT, MAX_SOIL_MOISTURE_PERCENT,
     MIN_PRESSURE_KPA, MAX_PRESSURE_KPA,
-    TANK_EMPTY_LEVEL_CM, TANK_FULL_LEVEL_CM,
+    TANK_EMPTY_DISTANCE_CM, TANK_FULL_DISTANCE_CM,
     ABNORMAL_READING_THRESHOLD
 )
 import statistics
@@ -87,19 +87,10 @@ class DataValidator:
         return True, None
 
     def validate_tank_level(self, value_cm: float, sensor_id: str) -> Tuple[bool, Optional[str]]:
-        """
-        Validate tank level reading.
-        
-        Args:
-            value_cm: Tank level in cm
-            sensor_id: Sensor identifier
-            
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
-        if value_cm < TANK_EMPTY_LEVEL_CM - 5 or value_cm > TANK_FULL_LEVEL_CM + 5:
-            return False, f"Tank level {value_cm} cm outside expected range [{TANK_EMPTY_LEVEL_CM - 5}, {TANK_FULL_LEVEL_CM + 5}] cm"
-        
+        """Validate tank level: sensor distance in cm (10 = 100% full, 100 = 0% empty)."""
+        margin = 5.0
+        if value_cm < TANK_FULL_DISTANCE_CM - margin or value_cm > TANK_EMPTY_DISTANCE_CM + margin:
+            return False, f"Tank level {value_cm} cm outside expected range [{TANK_FULL_DISTANCE_CM}, {TANK_EMPTY_DISTANCE_CM}] cm (10 = 100%%, 100 = 0%%)"
         return True, None
 
     def validate_range(self, value: float, min_value: float, max_value: float, 

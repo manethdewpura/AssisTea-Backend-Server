@@ -11,7 +11,7 @@ class PressureSensor(BaseSensor):
     """Water pressure sensor with noise filtering via ADS1115 ADC."""
 
     def __init__(self, sensor_id: str, adc: ADS1115ADC, channel: int, zone_id: Optional[int] = None,
-                 min_pressure_kpa: float = 0.0, max_pressure_kpa: float = 500.0):
+                 min_pressure_kpa: float = 0.0, max_pressure_kpa: float = 600.0):
         """
         Initialize pressure sensor.
         
@@ -30,6 +30,11 @@ class PressureSensor(BaseSensor):
         self.max_pressure_kpa = max_pressure_kpa
         self.noise_filter = NoiseFilter(window_size=5)
         self.unit_converter = UnitConverter()
+        # Detect disconnected sensor: floating ADC input often reads mid-scale (~0.5)
+        self._floating_count = 0
+        self._FLOATING_BAND_LOW = 0.48
+        self._FLOATING_BAND_HIGH = 0.52
+        self._FLOATING_THRESHOLD = 3  # consecutive reads in band -> treat as disconnected
 
     def read_raw(self) -> Dict[str, Any]:
         """
@@ -42,10 +47,24 @@ class PressureSensor(BaseSensor):
             # Read normalized value (0.0 to 1.0) from ADC channel
             normalized_value = self.adc.read_normalized(self.channel)
             
+            # Only check for floating (disconnected) input when using real hardware
+            if not getattr(self.adc, 'use_mock', True):
+                if self._FLOATING_BAND_LOW <= normalized_value <= self._FLOATING_BAND_HIGH:
+                    self._floating_count += 1
+                    if self._floating_count >= self._FLOATING_THRESHOLD:
+                        self.mark_failure()
+                        raise Exception(
+                            f"Pressure sensor {self.sensor_id} appears disconnected "
+                            f"(floating input reads ~{normalized_value:.3f} for {self._floating_count} reads)"
+                        )
+                else:
+                    self._floating_count = 0
+            
             # Convert to pressure using calibration range
             pressure_range = self.max_pressure_kpa - self.min_pressure_kpa
             raw_pressure_kpa = self.min_pressure_kpa + (normalized_value * pressure_range)
             
+            self._floating_count = 0  # Reset on successful valid read
             self.mark_success()
             return {
                 'value': raw_pressure_kpa,

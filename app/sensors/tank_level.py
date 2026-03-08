@@ -9,25 +9,35 @@ from app.utils.unit_converter import UnitConverter
 
 
 class TankLevelSensor(BaseSensor):
-    """HY-SR05 ultrasonic tank level sensor."""
+    """HY-SR05 ultrasonic tank level sensor.
+    Sensor measures distance to water surface: high cm = empty, low cm = full.
+    Calibration: empty_distance_cm (e.g. 100) = empty tank, full_distance_cm (e.g. 10) = full tank.
+    """
 
     def __init__(self, sensor_id: str, gpio: GPIOInterface, trigger_pin: int, echo_pin: int,
-                 tank_height_cm: float = 50.0):
+                 tank_height_cm: float = 50.0,
+                 empty_distance_cm: float = 100.0,
+                 full_distance_cm: float = 10.0):
         """
         Initialize tank level sensor.
-        
+
         Args:
             sensor_id: Unique sensor identifier
             gpio: GPIO interface instance
             trigger_pin: GPIO pin for trigger signal
             echo_pin: GPIO pin for echo signal
-            tank_height_cm: Height of tank in cm
+            tank_height_cm: Height of tank in cm (kept for backward compatibility / mock scaling)
+            empty_distance_cm: Sensor distance reading when tank is empty (e.g. 100 cm)
+            full_distance_cm: Sensor distance reading when tank is full (e.g. 10 cm)
         """
         super().__init__(sensor_id, zone_id=None)  # Tank is system-wide
         self.gpio = gpio
         self.trigger_pin = trigger_pin
         self.echo_pin = echo_pin
         self.tank_height_cm = tank_height_cm
+        self.empty_distance_cm = empty_distance_cm
+        self.full_distance_cm = full_distance_cm
+        self._fill_range_cm = max(0.0, empty_distance_cm - full_distance_cm)
         self.noise_filter = NoiseFilter(window_size=3)
         self.unit_converter = UnitConverter()
         
@@ -45,21 +55,21 @@ class TankLevelSensor(BaseSensor):
         Returns:
             Distance in cm
         """
-        # Check if we're using mock GPIO (for testing)
-        # In mock mode, read distance directly from analog value
-        if hasattr(self.gpio, 'read_analog'):
+        # Only use analog path for MockGPIO (development). Real GPIO must use
+        # pulse timing; RealGPIO.read_analog is digital 0/1 only, so a disconnected
+        # echo pin would yield a fake "valid" reading and sensor would stay healthy.
+        is_mock_gpio = type(self.gpio).__name__ == 'MockGPIO'
+        if is_mock_gpio and hasattr(self.gpio, 'read_analog'):
             try:
-                # Read normalized analog value (0.0-1.0) representing distance
                 normalized = self.gpio.read_analog(self.echo_pin)
-                # Convert normalized value to distance in cm
-                # normalized = 0.0 means distance = 0, normalized = 1.0 means distance = tank_height
-                distance_cm = normalized * self.tank_height_cm
+                # normalized 0 = full (low distance), 1 = empty (high distance)
+                distance_cm = self.full_distance_cm + normalized * self._fill_range_cm
                 return distance_cm
-            except:
-                # Fall back to digital pin reading if analog read fails
+            except Exception:
                 pass
         
-        # Real hardware or fallback: use digital pin timing method
+        # Real hardware: use digital echo pulse timing (HY-SR05). Disconnected
+        # sensor will timeout here and raise, so health is marked unhealthy.
         # Send trigger pulse (10 microseconds)
         self.gpio.write_pin(self.trigger_pin, True)
         time.sleep(0.00001)  # 10 microseconds
@@ -112,38 +122,32 @@ class TankLevelSensor(BaseSensor):
 
     def read_standardized(self) -> Dict[str, Any]:
         """
-        Read and return standardized tank level.
-        
-        Returns:
-            Dictionary with standardized reading data (level in cm and %)
+        Read and return tank level. Single convention: 10 cm = 100% full, 100 cm = 0% empty.
+        value = sensor distance in cm (10-100). value_percent = (100 - distance) / 90 * 100.
         """
         raw_data = self.read_raw()
-        raw_distance_cm = raw_data['value']
-        
-        # Apply noise filtering
-        filtered_distance = self.noise_filter.filter(raw_distance_cm)
-        
-        # Calculate level (distance from sensor to liquid surface)
-        # Level = tank_height - distance
-        level_cm = max(0.0, self.tank_height_cm - filtered_distance)
-        
-        # Calculate percentage
-        level_percent = (level_cm / self.tank_height_cm) * 100.0 if self.tank_height_cm > 0 else 0.0
+        distance_cm = raw_data['value']
+        if distance_cm == 0:
+            distance_cm = self.empty_distance_cm  # 100 cm
+
+        filtered_distance = self.noise_filter.filter(distance_cm)
+        distance_cm = max(self.full_distance_cm, min(self.empty_distance_cm, filtered_distance))
+
+        # 10 cm = 100%, 100 cm = 0%
+        level_percent = ((self.empty_distance_cm - distance_cm) / self._fill_range_cm * 100.0) if self._fill_range_cm > 0 else 0.0
         level_percent = max(0.0, min(100.0, level_percent))
-        
+
         reading = {
-            'value': level_cm,
+            'value': distance_cm,
             'unit': 'cm',
             'value_percent': level_percent,
-            'raw_value': raw_distance_cm,
+            'raw_value': distance_cm,
             'raw_unit': 'cm',
             'timestamp': datetime.now(),
             'sensor_id': self.sensor_id,
             'zone_id': self.zone_id
         }
-        
         self.last_reading = reading
         self.last_reading_time = datetime.now()
-        
         return reading
 

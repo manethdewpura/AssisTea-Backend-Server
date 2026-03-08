@@ -112,47 +112,38 @@ def mock_pressure_sensors(mock_adc):
 
 @pytest.fixture
 def mock_tank_level_sensor(mock_gpio):
-    """Create a mock tank level sensor."""
+    """Create a mock tank level sensor (100cm = empty, 10cm = full)."""
     sensor = TankLevelSensor(
         'tank_level_1', mock_gpio,
         DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
-        tank_height_cm=50.0
+        tank_height_cm=50.0,
+        empty_distance_cm=100.0,
+        full_distance_cm=10.0
     )
     return sensor
 
 
 @pytest.fixture
-def mock_weather_reader(monkeypatch, tmp_path):
-    """Create a mock weather reader with controllable weather."""
-    # Create a temporary weather database
-    weather_db = tmp_path / 'test_weather.db'
-    
-    # Set environment variable
-    monkeypatch.setenv('WEATHER_DB_PATH', str(weather_db))
-    monkeypatch.setattr('app.config.config.WEATHER_DB_PATH', str(weather_db))
-    
-    # Create database with test data
-    import sqlite3
-    conn = sqlite3.connect(str(weather_db))
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS weather (
-            timestamp TEXT,
-            condition TEXT,
-            temperature REAL,
-            humidity REAL,
-            precipitation REAL
-        )
-    ''')
-    # Insert clear weather by default
-    cursor.execute('''
-        INSERT INTO weather (timestamp, condition, temperature, humidity, precipitation)
-        VALUES (?, ?, ?, ?, ?)
-    ''', ('2024-01-01 12:00:00', 'clear', 25.0, 50.0, 0.0))
-    conn.commit()
-    conn.close()
-    
-    return WeatherReader()
+def mock_weather_reader():
+    """Create a mock weather reader that does not touch the real database."""
+
+    class MockWeatherReader:
+        def __init__(self):
+            self.sensor_id = "mock_weather_reader"
+            self.zone_id = None
+
+        def read_standardized(self):
+            # Default to clear, irrigation-friendly weather
+            return {
+                'condition': 'clear',
+                'temperature': 25.0,
+                'humidity': 50.0,
+                'precipitation': 0.0,
+                'is_ml_generated': False,
+                'confidence_score': 1.0,
+            }
+
+    return MockWeatherReader()
 
 
 @pytest.fixture
@@ -165,7 +156,7 @@ def irrigation_controller(mock_gpio, mock_adc, mock_soil_moisture_sensors,
     valve_controller_hw = SolenoidValveController(mock_gpio, zone_pins)
     
     # Initialize hydraulic components
-    pressure_calculator = PressureCalculator(reference_altitude_m=0.0)
+    pressure_calculator = PressureCalculator()
     valve_controller = HydraulicValveController(valve_controller_hw)
     pump_controller = HydraulicPumpController(pump_controller_hw)
     decision_engine = HybridEngine()
@@ -178,7 +169,7 @@ def irrigation_controller(mock_gpio, mock_adc, mock_soil_moisture_sensors,
         decision_engine=decision_engine,
         soil_moisture_sensors=mock_soil_moisture_sensors,
         weather_reader=mock_weather_reader,
-        pressure_sensors=mock_pressure_sensors,
+        pressure_sensor=mock_pressure_sensors[1],
         db_session_factory=temp_db
     )
     
@@ -216,10 +207,6 @@ def app(irrigation_controller, fertigation_controller):
     from app.api import irrigation, fertigation
     irrigation.controllers = {
         'irrigation': irrigation_controller,
-        'zone_configs': {
-            1: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0},
-            2: {'altitude': 0.0, 'slope': 0.0, 'base_pressure': 200.0}
-        }
     }
     fertigation.controllers = {
         'fertigation': fertigation_controller

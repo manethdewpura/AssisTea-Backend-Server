@@ -51,8 +51,10 @@ from app.hardware.valve_interface import SolenoidValveController
 from app.hardware.tank_valve_controller import TankValveController
 from app.config.config import (
     IRRIGATION_PUMP_GPIO_PIN, FERTILIZER_PUMP_GPIO_PIN, IRRIGATION_PUMP_SOLENOID_PIN,
+    FERTILIZER_PUMP_SOLENOID_PIN,
     TANK_INLET_SOLENOID_PIN, TANK_OUTLET_SOLENOID_PIN,
-    DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
+    DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
+    TANK_EMPTY_DISTANCE_CM, TANK_FULL_DISTANCE_CM
 )
 
 # Initialize ML background task (checks for stale data every 30 minutes)
@@ -75,8 +77,11 @@ fertilizer_pump_controller_hw = SimplePumpController(gpio, FERTILIZER_PUMP_GPIO_
 
 # Initialize irrigation pump solenoid valve with state manager
 from app.hardware.irrigation_pump_solenoid import IrrigationPumpSolenoid
+from app.hardware.fertilizer_pump_solenoid import FertilizerPumpSolenoid
 irrigation_pump_solenoid = IrrigationPumpSolenoid(gpio, IRRIGATION_PUMP_SOLENOID_PIN, solenoid_state_manager)
 logging.info("✓ Irrigation pump solenoid initialized with state persistence")
+fertilizer_pump_solenoid = FertilizerPumpSolenoid(gpio, FERTILIZER_PUMP_SOLENOID_PIN, solenoid_state_manager)
+logging.info("✓ Fertilizer pump solenoid initialized with state persistence")
 
 # Initialize tank valves with state manager
 tank_valve_controller = TankValveController(
@@ -105,6 +110,7 @@ from app.config.config import (
     ZONE_SOIL_MOISTURE_SENSOR_CHANNEL,
     ZONE_SOIL_MOISTURE_DRY_VALUE,
     ZONE_SOIL_MOISTURE_WET_VALUE,
+    MAX_PRESSURE_KPA,
 )
 
 # Initialize single zone with hardcoded configuration
@@ -130,15 +136,36 @@ logging.info(f"✓ Soil moisture sensor initialized for zone {ZONE_ID} on ADS111
 logging.info(f"✓ Zone valve GPIO pin: {ZONE_VALVE_GPIO_PIN}")
 
 # Irrigation pump pressure sensor on A2 (channel 2) - system-wide (common for all zones)
-irrigation_pressure_sensor = PressureSensor('pressure_irrigation', adc, ADS1115_PRESSURE_CHANNEL, zone_id=None)  # A2 for irrigation pump
+# Use 0–MAX so mock can display low calculated pressures. Min 600 for max so we never cap at 500 kPa.
+_sensor_max_kpa = max(MAX_PRESSURE_KPA, 600.0)
+irrigation_pressure_sensor = PressureSensor(
+    'pressure_irrigation', adc, ADS1115_PRESSURE_CHANNEL, zone_id=None,
+    min_pressure_kpa=0.0, max_pressure_kpa=_sensor_max_kpa
+)
 logging.info("✓ Irrigation pressure sensor initialized (system-wide)")
 
 # Fertilizer pump pressure sensor on A3 (channel 3) - system-wide
-fertilizer_pressure_sensor = PressureSensor('pressure_fertilizer', adc, ADS1115_FERTILIZER_PRESSURE_CHANNEL, zone_id=None)  # A3 for fertilizer pump
+fertilizer_pressure_sensor = PressureSensor(
+    'pressure_fertilizer', adc, ADS1115_FERTILIZER_PRESSURE_CHANNEL, zone_id=None,
+    min_pressure_kpa=0.0, max_pressure_kpa=_sensor_max_kpa
+)
 logging.info("✓ Fertilizer pressure sensor initialized (system-wide)")
 tank_level_sensor = TankLevelSensor(
-    'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN
+    'tank_level_1', gpio, DEFAULT_TANK_LEVEL_TRIGGER_PIN, DEFAULT_TANK_LEVEL_ECHO_PIN,
+    empty_distance_cm=TANK_EMPTY_DISTANCE_CM,
+    full_distance_cm=TANK_FULL_DISTANCE_CM
 )
+
+# Set initial mock sensor values when in mock mode: soil 0%, pressure 0 kPa, tank 100 cm (empty)
+if USE_MOCK_HARDWARE:
+    adc.set_mock_value(ZONE_SOIL_MOISTURE_SENSOR_CHANNEL, ZONE_SOIL_MOISTURE_DRY_VALUE)  # 0% moisture (dry)
+    adc.set_mock_value(ADS1115_PRESSURE_CHANNEL, 0.0)  # irrigation pressure 0 kPa
+    adc.set_mock_value(ADS1115_FERTILIZER_PRESSURE_CHANNEL, 0.0)  # fertilizer pressure 0 kPa
+    if hasattr(gpio, 'set_analog_value'):
+        # Tank level: normalized 1.0 => distance 100 cm (empty). 0 => 10 cm (full).
+        gpio.set_analog_value(tank_level_sensor.echo_pin, 1.0)
+    logging.info("✓ Mock sensors initialized: soil 0%%, pressure 0 kPa, tank 100 cm (empty)")
+
 weather_reader = WeatherReader(app=app)
 
 # Initialize zone valve controller with hardcoded zone pin
@@ -149,8 +176,27 @@ logging.info(f"✓ Zone valve controller initialized with zone {ZONE_ID} (GPIO p
 from app.hydraulics.pressure_calculator import PressureCalculator
 from app.hydraulics.valve_controller import HydraulicValveController
 from app.hydraulics.pump_controller import HydraulicPumpController
+from app.utils.system_config_helper import load_system_config
+from app.config.config import ESTIMATED_FLOW_RATE_M3_PER_S
 
-pressure_calculator = PressureCalculator(reference_altitude_m=0.0)
+# Load or seed system-wide hydraulic configuration from the database.
+db = next(get_db())
+try:
+    sys_cfg = load_system_config(db)
+finally:
+    db.close()
+
+# Flow rate from DB may be stored as L/s (e.g. 3); convert to m³/s for calculations (1 m³/s = 1000 L/s).
+_flow_m3_s = sys_cfg.get('estimated_flow_rate_m3_per_s') or ESTIMATED_FLOW_RATE_M3_PER_S
+if _flow_m3_s > 0.05:
+    _flow_m3_s = _flow_m3_s / 1000.0
+
+# Initialize pressure calculator using DB-backed pipe geometry and flow rate.
+pressure_calculator = PressureCalculator(
+    pipe_length_m=sys_cfg.get('pipe_length_m'),
+    pipe_diameter_m=sys_cfg.get('pipe_diameter_m'),
+    flow_rate_m3_per_s=_flow_m3_s,
+)
 valve_controller = HydraulicValveController(valve_controller_hw)
 irrigation_pump_controller = HydraulicPumpController(irrigation_pump_controller_hw, pressure_sensor=irrigation_pressure_sensor)
 fertilizer_pump_controller = HydraulicPumpController(fertilizer_pump_controller_hw, pressure_sensor=fertilizer_pressure_sensor)
@@ -171,7 +217,8 @@ irrigation_controller = IrrigationController(
     soil_moisture_sensors=soil_moisture_sensors,
     weather_reader=weather_reader,
     pressure_sensor=irrigation_pressure_sensor,
-    db_session_factory=get_db
+    db_session_factory=get_db,
+    irrigation_pump_solenoid=irrigation_pump_solenoid,
 )
 
 # Initialize fertigation controller with separate irrigation and fertilizer pumps
@@ -185,7 +232,9 @@ fertigation_controller = FertigationController(
     pressure_sensor=fertilizer_pressure_sensor,  # A3 pressure sensor for fertilizer pump
     fertilizer_pump_controller=fertilizer_pump_controller,  # Fertilizer pump (GPIO 22)
     irrigation_pump_controller=irrigation_pump_controller,  # Irrigation pump (GPIO 23)
-    irrigation_pump_solenoid=irrigation_pump_solenoid  # Irrigation pump solenoid (GPIO 24)
+    irrigation_pump_solenoid=irrigation_pump_solenoid,  # Irrigation pump solenoid (GPIO 24)
+    fertilizer_pump_solenoid=fertilizer_pump_solenoid,  # Fertilizer pump solenoid (opens with tank outlet)
+    pressure_calculator=pressure_calculator,  # Same hydraulic calc as irrigation for flush pressure
 )
 
 # Initialize fail-safe mechanisms
@@ -267,6 +316,7 @@ if USE_MOCK_HARDWARE:
 
 # Set up solenoid state manager for API
 solenoids.state_manager = solenoid_state_manager
+solenoids.valve_controller = valve_controller
 
 # Root route
 @app.route('/')

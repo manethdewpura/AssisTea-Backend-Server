@@ -12,8 +12,9 @@ from app.sensors.weather import WeatherReader
 from app.sensors.pressure import PressureSensor
 from app.config.config import (
     ADEQUATE_SOIL_MOISTURE_PERCENT, MOISTURE_CHECK_INTERVAL_SEC,
-    MAX_OPERATION_DURATION_SEC
+    MAX_OPERATION_DURATION_SEC, PRESSURE_OVERPRESSURE_STOP_PERCENT,
 )
+from app.utils.system_config_helper import load_system_config
 from app.models.operational_log import OperationalLog, OperationType, OperationStatus
 from app.models.system_log import SystemLog, LogLevel
 
@@ -28,7 +29,8 @@ class IrrigationController:
                  soil_moisture_sensors: Dict[int, SoilMoistureSensor],
                  weather_reader: WeatherReader,
                  pressure_sensor: Optional[PressureSensor],
-                 db_session_factory: Callable):
+                 db_session_factory: Callable,
+                 irrigation_pump_solenoid: Optional[object] = None):
         """
         Initialize irrigation controller.
         
@@ -41,6 +43,7 @@ class IrrigationController:
             weather_reader: Weather reader instance
             pressure_sensor: System-wide irrigation pressure sensor (common for all zones)
             db_session_factory: Function that returns a database session
+            irrigation_pump_solenoid: Optional solenoid valve to open when irrigation runs (closed when stopped)
         """
         self.pressure_calculator = pressure_calculator
         self.valve_controller = valve_controller
@@ -50,19 +53,21 @@ class IrrigationController:
         self.weather_reader = weather_reader
         self.pressure_sensor = pressure_sensor
         self.db_session_factory = db_session_factory
+        self.irrigation_pump_solenoid = irrigation_pump_solenoid
         
         self.is_running = False
         self.current_zone: Optional[int] = None
         self.operation_thread: Optional[threading.Thread] = None
         self.start_time: Optional[datetime] = None
 
-    def start_irrigation(self, zone_id: int, zone_config: Dict) -> Dict[str, any]:
+    def start_irrigation(self, zone_id: int, zone_config: Dict, skip_weather_check: bool = False) -> Dict[str, any]:
         """
         Start irrigation cycle for a zone.
         
         Args:
             zone_id: Zone ID to irrigate
             zone_config: Zone configuration dictionary
+            skip_weather_check: If True, do not block on weather; start irrigation regardless of conditions
             
         Returns:
             Dictionary with operation status
@@ -74,39 +79,52 @@ class IrrigationController:
                 'current_zone': self.current_zone
             }
         
-        # Check weather (skip if not clear)
-        try:
-            weather_data = self.weather_reader.read_standardized()
-        except Exception as e:
-            self._log_system(LogLevel.ERROR, 'irrigation_controller',
-                           f'Failed to read weather data: {str(e)}')
-            return {
-                'success': False,
-                'message': f'Failed to retrieve weather data: {str(e)}',
-                'error': 'weather_read_failed'
+        if skip_weather_check:
+            # Use a minimal clear placeholder so downstream logic and logging still work
+            weather_data = {
+                'condition': 'clear',
+                'temperature': None,
+                'humidity': None,
+                'precipitation': 0.0,
+                'is_ml_generated': False,
+                'confidence_score': 1.0,
             }
-        
-        # Log weather information for tracking
-        weather_source = 'ML prediction' if weather_data.get('is_ml_generated', False) else 'API'
-        weather_confidence = weather_data.get('confidence_score', 1.0)
-        self._log_system(LogLevel.INFO, 'irrigation_controller',
-                        f'Weather check: condition={weather_data["condition"]}, '
-                        f'temp={weather_data.get("temperature", "N/A")}°C, '
-                        f'humidity={weather_data.get("humidity", "N/A")}%, '
-                        f'source={weather_source}, confidence={weather_confidence:.2f}')
-        
-        if weather_data['condition'] != 'clear':
-            weather_display = weather_data['condition'].capitalize()
-            return {
-                'success': False,
-                'message': f'Irrigation skipped: Weather is {weather_display.lower()}',
-                'weather_condition': weather_data['condition'],
-                'weather_temperature': weather_data.get('temperature'),
-                'weather_humidity': weather_data.get('humidity'),
-                'weather_precipitation': weather_data.get('precipitation', 0.0),
-                'is_ml_generated': weather_data.get('is_ml_generated', False),
-                'confidence_score': weather_data.get('confidence_score', 1.0)
-            }
+            self._log_system(LogLevel.INFO, 'irrigation_controller',
+                            'Weather check skipped by user; starting irrigation without weather validation')
+        else:
+            # Check weather (skip if not clear)
+            try:
+                weather_data = self.weather_reader.read_standardized()
+            except Exception as e:
+                self._log_system(LogLevel.ERROR, 'irrigation_controller',
+                               f'Failed to read weather data: {str(e)}')
+                return {
+                    'success': False,
+                    'message': f'Failed to retrieve weather data: {str(e)}',
+                    'error': 'weather_read_failed'
+                }
+            
+            # Log weather information for tracking
+            weather_source = 'ML prediction' if weather_data.get('is_ml_generated', False) else 'API'
+            weather_confidence = weather_data.get('confidence_score', 1.0)
+            self._log_system(LogLevel.INFO, 'irrigation_controller',
+                            f'Weather check: condition={weather_data["condition"]}, '
+                            f'temp={weather_data.get("temperature", "N/A")}°C, '
+                            f'humidity={weather_data.get("humidity", "N/A")}%, '
+                            f'source={weather_source}, confidence={weather_confidence:.2f}')
+            
+            if weather_data['condition'] != 'clear':
+                weather_display = weather_data['condition'].capitalize()
+                return {
+                    'success': False,
+                    'message': f'Irrigation skipped: Weather is {weather_display.lower()}',
+                    'weather_condition': weather_data['condition'],
+                    'weather_temperature': weather_data.get('temperature'),
+                    'weather_humidity': weather_data.get('humidity'),
+                    'weather_precipitation': weather_data.get('precipitation', 0.0),
+                    'is_ml_generated': weather_data.get('is_ml_generated', False),
+                    'confidence_score': weather_data.get('confidence_score', 1.0)
+                }
         
         # Check soil moisture
         if zone_id not in self.soil_moisture_sensors:
@@ -185,19 +203,48 @@ class IrrigationController:
 
     def _irrigation_cycle(self, zone_id: int, zone_config: Dict, start_moisture: float, weather_data: Dict = None):
         """Execute irrigation cycle."""
+        self._over_pressure_notes = None
         try:
             # Log operation start with weather info
             self._log_operation(zone_id, OperationStatus.STARTED, 
                               start_moisture=start_moisture,
                               weather_info=weather_data)
             
-            # Calculate required pressure
+            # Refresh hydraulic geometry from the latest system configuration
+            # so that runtime config changes (pipe length / diameter / flow rate)
+            # are reflected without restarting the process.
+            try:
+                db = next(self.db_session_factory())
+                try:
+                    sys_cfg = load_system_config(db)
+                finally:
+                    db.close()
+            except Exception:
+                sys_cfg = {}
+
+            pipe_length_m = sys_cfg.get('pipe_length_m', self.pressure_calculator.pipe_length_m)
+            pipe_diameter_m = sys_cfg.get('pipe_diameter_m', self.pressure_calculator.pipe_diameter_m)
+            flow_rate_m3_per_s = sys_cfg.get('estimated_flow_rate_m3_per_s', self.pressure_calculator.flow_rate_m3_per_s)
+            # If value looks like L/s (e.g. 3 for 3 L/s) not m³/s, convert: 1 m³/s = 1000 L/s
+            if flow_rate_m3_per_s > 0.05:
+                flow_rate_m3_per_s = flow_rate_m3_per_s / 1000.0
+
+            # Update calculator instance in-place with current geometry
+            self.pressure_calculator.pipe_length_m = pipe_length_m
+            self.pressure_calculator.pipe_diameter_m = pipe_diameter_m
+            self.pressure_calculator.flow_rate_m3_per_s = flow_rate_m3_per_s
+
+            # Calculate required pressure using up-to-date geometry and zone config
             pressure_calc = self.pressure_calculator.calculate_required_pressure(
-                zone_config['altitude'],
                 zone_config['slope'],
                 zone_config['base_pressure']
             )
             target_pressure = pressure_calc['total_required_pressure_kpa']
+            
+            # Open irrigation pump solenoid so water can flow (when present)
+            if self.irrigation_pump_solenoid:
+                self.irrigation_pump_solenoid.open()
+                self._log_system(LogLevel.INFO, 'irrigation_controller', 'Irrigation pump solenoid opened')
             
             # Open zone valve and close others
             if not self.valve_controller.open_zone(zone_id, close_others=True):
@@ -231,6 +278,18 @@ class IrrigationController:
                     except:
                         pass
                 
+                # Stop irrigation if pressure exceeds calculated target by configured percent
+                if current_pressure is not None and target_pressure > 0:
+                    overpressure_limit = target_pressure * (1.0 + PRESSURE_OVERPRESSURE_STOP_PERCENT / 100.0)
+                    if current_pressure > overpressure_limit:
+                        over_pressure_msg = (
+                            f'Over-pressure stop: {current_pressure:.1f} kPa exceeds required pressure limit '
+                            f'({overpressure_limit:.1f} kPa, target + {PRESSURE_OVERPRESSURE_STOP_PERCENT}%)'
+                        )
+                        self._log_system(LogLevel.ERROR, 'irrigation_controller', over_pressure_msg)
+                        self._over_pressure_notes = over_pressure_msg
+                        break
+                
                 self.pump_controller.maintain_pressure(current_pressure)
                 
                 # Check soil moisture periodically
@@ -252,52 +311,67 @@ class IrrigationController:
                 
                 time.sleep(1)  # Small delay to prevent CPU spinning
             
-            # Stop irrigation
-            self._stop_irrigation(zone_id, start_moisture)
+            # Stop irrigation (pass over-pressure reason for activity log if we stopped due to over-pressure)
+            self._stop_irrigation(zone_id, start_moisture, failure_notes=self._over_pressure_notes)
             
         except Exception as e:
             self._log_system(LogLevel.ERROR, 'irrigation_controller',
                            f'Irrigation cycle error for zone {zone_id}: {str(e)}')
             self._log_operation(zone_id, OperationStatus.FAILED)
+            # Ensure pump, zone valve, and solenoid are closed on error
+            try:
+                self.pump_controller.stop_pressure_control()
+                self.valve_controller.close_zone(zone_id)
+                if self.irrigation_pump_solenoid:
+                    self.irrigation_pump_solenoid.close()
+            except Exception:
+                pass
             self.is_running = False
             self.current_zone = None
 
-    def _stop_irrigation(self, zone_id: int, start_moisture: float):
-        """Stop irrigation and clean up."""
-        # Stop pump
-        self.pump_controller.stop_pressure_control()
-        
-        # Close zone valve
-        self.valve_controller.close_zone(zone_id)
-        
-        # Get end moisture
-        end_moisture = start_moisture
-        if zone_id in self.soil_moisture_sensors:
+    def _stop_irrigation(self, zone_id: int, start_moisture: float, failure_notes: Optional[str] = None):
+        """Stop irrigation and clean up. If failure_notes is set (e.g. over-pressure), log as FAILED in activity log."""
+        try:
+            # Stop pump and valves first so the physical stop always happens
+            self.pump_controller.stop_pressure_control()
+            self.valve_controller.close_zone(zone_id)
+            if self.irrigation_pump_solenoid:
+                self.irrigation_pump_solenoid.close()
+                self._log_system(LogLevel.INFO, 'irrigation_controller', 'Irrigation pump solenoid closed')
+            
+            # Get end moisture
+            end_moisture = start_moisture
+            if zone_id in self.soil_moisture_sensors:
+                try:
+                    moisture_data = self.soil_moisture_sensors[zone_id].read_standardized()
+                    end_moisture = moisture_data['value']
+                except:
+                    pass
+            
+            duration = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
+            weather_info = None
             try:
-                moisture_data = self.soil_moisture_sensors[zone_id].read_standardized()
-                end_moisture = moisture_data['value']
+                weather_info = self.weather_reader.read_standardized()
             except:
                 pass
-        
-        # Calculate duration
-        duration = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
-        
-        # Get current weather for logging (optional, for completion record)
-        weather_info = None
-        try:
-            weather_info = self.weather_reader.read_standardized()
-        except:
-            pass
-        
-        # Log completion
-        self._log_operation(zone_id, OperationStatus.COMPLETED,
-                           duration=duration,
-                           start_moisture=start_moisture,
-                           end_moisture=end_moisture,
-                           weather_info=weather_info)
-        
-        self.is_running = False
-        self.current_zone = None
+            
+            if failure_notes:
+                self._log_operation(zone_id, OperationStatus.FAILED,
+                                   duration=duration,
+                                   start_moisture=start_moisture,
+                                   end_moisture=end_moisture,
+                                   notes=(failure_notes[:500] if failure_notes else None),
+                                   weather_info=weather_info)
+            else:
+                self._log_operation(zone_id, OperationStatus.COMPLETED,
+                                   duration=duration,
+                                   start_moisture=start_moisture,
+                                   end_moisture=end_moisture,
+                                   weather_info=weather_info)
+        finally:
+            # Always clear run state so over-pressure stop is effective even if logging fails
+            self.is_running = False
+            self.current_zone = None
 
     def stop_irrigation(self) -> Dict[str, any]:
         """Stop current irrigation cycle."""
