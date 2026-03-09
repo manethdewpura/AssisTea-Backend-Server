@@ -45,6 +45,10 @@ def test_ml_prediction_system(app):
         current_count = WeatherCurrent.query.count()
         forecast_count = WeatherForecast.query.count()
         ml_generated_count = WeatherCurrent.query.filter_by(is_ml_generated=True).count()
+
+        # Get latest current record to determine active city (mirrors /predict-ml behavior)
+        latest_current = WeatherCurrent.query.order_by(WeatherCurrent.timestamp.desc()).first()
+        city_id = latest_current.location_id if latest_current else None
         
         print(f"  - weather_current: {current_count} records")
         print(f"    └─ ML-generated: {ml_generated_count} records")
@@ -54,7 +58,8 @@ def test_ml_prediction_system(app):
         print("\n[Test 3] Building Historical Data for Prediction...")
         try:
             historical_data, city_info, data_source_info = build_historical_data_for_prediction(
-                lookback_hours=predictor.lookback_hours
+                lookback_hours=predictor.lookback_hours,
+                city_id=city_id
             )
             
             print(f"  - Total records retrieved: {len(historical_data)}")
@@ -67,10 +72,12 @@ def test_ml_prediction_system(app):
                 print(f"  - City: {city_info['name']}, {city_info['country']}")
             
             if not data_source_info['has_sufficient_data']:
-                print(f"\n⚠ WARNING: Insufficient data for prediction (need at least 48 records)")
-                print(f"  Current records: {len(historical_data)}")
+                print(
+                    f"\n⚠ WARNING: Insufficient data for prediction "
+                    f"(need at least {predictor.lookback_hours} records, got {len(historical_data)})"
+                )
                 print(f"\nℹ This is expected for a new database. Options:")
-                print(f"  1. Wait for API to collect more data (48 hours worth)")
+                print(f"  1. Wait for API to collect more data ({predictor.lookback_hours} hours worth)")
                 print(f"  2. Use weather_forecast data (already available)")
                 print(f"\nThe system will use available forecast data to supplement.")
         
@@ -80,15 +87,21 @@ def test_ml_prediction_system(app):
             traceback.print_exc()
             return
         
+        # If we still don't have enough data, mirror production behavior and stop here
+        if not data_source_info['has_sufficient_data']:
+            print("\n[SKIP] Not enough historical data to safely run ML prediction.")
+            print(
+                f"  Need at least {predictor.lookback_hours} records, "
+                f"got {len(historical_data)}. This matches /predict-ml behavior."
+            )
+            print("\nTEST COMPLETE (input data insufficient for ML prediction)\n")
+            return
+        
         # Test 4: Generate ML Predictions
         print("\n[Test 4] Generating ML Predictions...")
         
-        if len(historical_data) < 48:
-            print(f"⚠ Only {len(historical_data)} records available, need at least 48")
-            print("  Attempting prediction anyway (may use forecast data)...")
-        
         try:
-            # Calculate confidence based on data sources
+            # Calculate confidence based on data sources (same tiers as /predict-ml)
             base_confidence = 1.0
             if data_source_info['forecast_count'] > 0:
                 base_confidence = 0.75
@@ -124,15 +137,22 @@ def test_ml_prediction_system(app):
             forecast_created = 0
             current_created = 0
             
-            if not city_info:
+            # Mirror /predict-ml: prefer city_info from helper, fall back to latest_current
+            if city_info:
+                city_id = city_info['id']
+                city_name = city_info['name']
+                city_country = city_info['country']
+                city_coord_lat = city_info['coord_lat']
+                city_coord_lon = city_info['coord_lon']
+            elif latest_current:
+                city_id = latest_current.location_id
+                city_name = latest_current.location_name
+                city_country = latest_current.country or ''
+                city_coord_lat = latest_current.coord_lat
+                city_coord_lon = latest_current.coord_lon
+            else:
                 print("✗ No city information available")
                 return
-            
-            city_id = city_info['id']
-            city_name = city_info['name']
-            city_country = city_info['country']
-            city_coord_lat = city_info['coord_lat']
-            city_coord_lon = city_info['coord_lon']
             
             for pred_record in predicted_records:
                 # Store in weather_forecast
@@ -141,7 +161,33 @@ def test_ml_prediction_system(app):
                     forecast_dt=pred_record['forecast_dt']
                 ).first()
                 
-                if not existing_forecast:
+                if existing_forecast:
+                    # Update existing forecast record (same as /predict-ml)
+                    existing_forecast.timestamp = timestamp
+                    existing_forecast.synced_at = datetime.utcnow()
+                    existing_forecast.forecast_dt_txt = pred_record['forecast_dt_txt']
+                    existing_forecast.temp = pred_record['temp']
+                    existing_forecast.feels_like = pred_record['feels_like']
+                    existing_forecast.temp_min = pred_record['temp_min']
+                    existing_forecast.temp_max = pred_record['temp_max']
+                    existing_forecast.pressure = pred_record['pressure']
+                    existing_forecast.humidity = pred_record['humidity']
+                    existing_forecast.wind_speed = pred_record['wind_speed']
+                    existing_forecast.wind_deg = pred_record['wind_deg']
+                    existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
+                    existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
+                    existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                    existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
+                    existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
+                    existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
+                    existing_forecast.raw_data = json.dumps({
+                        **pred_record,
+                        'is_ml_prediction': True,
+                        'predicted_at': timestamp,
+                        'confidence_score': base_confidence
+                    })
+                else:
+                    # Create new forecast record
                     forecast_record = WeatherForecast(
                         timestamp=timestamp,
                         forecast_dt=pred_record['forecast_dt'],

@@ -25,6 +25,7 @@ from app.models.weather_records import (
     build_historical_data_for_prediction,
     interpolate_weather_data,
 )
+from app.ml.predictor import get_predictor, is_ml_available
 
 # Create minimal Flask app
 app = Flask(__name__)
@@ -52,9 +53,9 @@ def run_synthetic_interpolation_scenarios():
     # A) Duplicates within the same hour: keep most recent per bucket
     print("\n  A) Duplicate records within the same hour")
     records = [
-        {'timestamp': ms(base + timedelta(hours=0, minutes=15)), 'temp': 20, 'feels_like': 20, 'temp_min': 19, 'temp_max': 21, 'pressure': 1000, 'humidity': 50, 'wind_speed': 2, 'wind_deg': 90, 'rain_1h': 0, 'rain_3h': 0},
-        {'timestamp': ms(base + timedelta(hours=0, minutes=45)), 'temp': 21, 'feels_like': 21, 'temp_min': 20, 'temp_max': 22, 'pressure': 1001, 'humidity': 51, 'wind_speed': 2.5, 'wind_deg': 100, 'rain_1h': 0, 'rain_3h': 0},
-        {'timestamp': ms(base + timedelta(hours=1)), 'temp': 22, 'feels_like': 22, 'temp_min': 21, 'temp_max': 23, 'pressure': 1002, 'humidity': 52, 'wind_speed': 3, 'wind_deg': 110, 'rain_1h': 0, 'rain_3h': 0},
+        {'timestamp': ms(base + timedelta(hours=0, minutes=15)), 'temp': 20, 'feels_like': 20, 'temp_min': 19, 'temp_max': 21, 'pressure': 1000, 'humidity': 50, 'wind_speed': 2, 'wind_deg': 90, 'clouds_all': 50, 'rain_1h': 0, 'rain_3h': 0},
+        {'timestamp': ms(base + timedelta(hours=0, minutes=45)), 'temp': 21, 'feels_like': 21, 'temp_min': 20, 'temp_max': 22, 'pressure': 1001, 'humidity': 51, 'wind_speed': 2.5, 'wind_deg': 100, 'clouds_all': 60, 'rain_1h': 0, 'rain_3h': 0},
+        {'timestamp': ms(base + timedelta(hours=1)), 'temp': 22, 'feels_like': 22, 'temp_min': 21, 'temp_max': 23, 'pressure': 1002, 'humidity': 52, 'wind_speed': 3, 'wind_deg': 110, 'clouds_all': 70, 'rain_1h': 0, 'rain_3h': 0},
     ]
     out, count = interpolate_weather_data(records, lookback_hours=2)
     print(f"    - Output len={len(out)}, interpolated={count}")
@@ -64,9 +65,20 @@ def run_synthetic_interpolation_scenarios():
     print("\n  B) Gapped records over long span")
     sparse = []
     for h in [0, 10, 25, 47, 80]:
-        sparse.append({'timestamp': ms(base + timedelta(hours=h)), 'temp': 15 + h*0.1, 'feels_like': 15 + h*0.1,
-                       'temp_min': 14 + h*0.1, 'temp_max': 16 + h*0.1, 'pressure': 1000, 'humidity': 60,
-                       'wind_speed': 2, 'wind_deg': 180, 'rain_1h': 0, 'rain_3h': 0})
+        sparse.append({
+            'timestamp': ms(base + timedelta(hours=h)),
+            'temp': 15 + h*0.1,
+            'feels_like': 15 + h*0.1,
+            'temp_min': 14 + h*0.1,
+            'temp_max': 16 + h*0.1,
+            'pressure': 1000,
+            'humidity': 60,
+            'wind_speed': 2,
+            'wind_deg': 180,
+            'clouds_all': 50,
+            'rain_1h': 0,
+            'rain_3h': 0,
+        })
     out, count = interpolate_weather_data(sparse, lookback_hours=48)
     ts = [r['timestamp'] for r in out]
     print(f"    - Output len={len(out)}, interpolated={count}")
@@ -77,9 +89,20 @@ def run_synthetic_interpolation_scenarios():
     print("\n  C) Insufficient timespan; extrapolation beyond latest data")
     short = []
     for h in range(0, 6):
-        short.append({'timestamp': ms(base + timedelta(hours=h)), 'temp': 10 + h, 'feels_like': 10 + h,
-                      'temp_min': 9 + h, 'temp_max': 11 + h, 'pressure': 1000, 'humidity': 55,
-                      'wind_speed': 1.5, 'wind_deg': 200, 'rain_1h': 0, 'rain_3h': 0})
+        short.append({
+            'timestamp': ms(base + timedelta(hours=h)),
+            'temp': 10 + h,
+            'feels_like': 10 + h,
+            'temp_min': 9 + h,
+            'temp_max': 11 + h,
+            'pressure': 1000,
+            'humidity': 55,
+            'wind_speed': 1.5,
+            'wind_deg': 200,
+            'clouds_all': 40,
+            'rain_1h': 0,
+            'rain_3h': 0,
+        })
     out, count = interpolate_weather_data(short, lookback_hours=12)
     ts = [r['timestamp'] for r in out]
     print(f"    - Output len={len(out)}, interpolated={count}")
@@ -88,6 +111,15 @@ def run_synthetic_interpolation_scenarios():
 
 with app.app_context():
     db.init_app(app)
+    
+    print("\nChecking ML predictor availability...")
+    predictor = get_predictor()
+    if not predictor:
+        print("✗ ML predictor not available. Install TensorFlow and ensure model files exist.")
+        sys.exit(1)
+    
+    lookback_hours = predictor.lookback_hours
+    print(f"✓ ML predictor loaded (lookback_hours={lookback_hours})")
     
     print("\n" + "="*70)
     print("INTERPOLATION TEST")
@@ -102,10 +134,15 @@ with app.app_context():
     print(f"  - Total: {current_count + forecast_count} records")
     
     # Test historical data building with interpolation
-    print("\n[2] Building Historical Data (48 hours required):")
+    print(f"\n[2] Building Historical Data ({lookback_hours} hours required):")
     try:
+        # Mirror /predict-ml: determine active city from latest current record
+        latest_current = WeatherCurrent.query.order_by(WeatherCurrent.timestamp.desc()).first()
+        city_id = latest_current.location_id if latest_current else None
+        
         historical_data, city_info, data_source_info = build_historical_data_for_prediction(
-            lookback_hours=48
+            lookback_hours=lookback_hours,
+            city_id=city_id
         )
         
         print(f"\n  Results:")
@@ -122,7 +159,10 @@ with app.app_context():
         
         if data_source_info['has_sufficient_data']:
             print(f"\n✓ SUCCESS: ML Prediction can now proceed!")
-            print(f"  Confidence adjustment: ~{(1 - data_source_info.get('interpolation_ratio', 0) * 0.3):.2%}")
+            # Same interpolation penalty logic as background_task: up to -30%
+            interpolation_ratio = data_source_info.get('interpolation_ratio', 0)
+            confidence_multiplier = 1 - interpolation_ratio * 0.3
+            print(f"  Confidence multiplier from interpolation: {confidence_multiplier:.2f}")
         else:
             print(f"\n✗ FAILED: Still insufficient data")
             
