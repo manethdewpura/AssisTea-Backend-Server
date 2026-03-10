@@ -51,11 +51,12 @@ ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin fo
 # ADS1115 channel for soil moisture sensor (0-3)
 ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHANNEL', '0'))
 # Soil moisture calibration (normalized ADC reading, 0.0-1.0)
-# Defaults based on the project's measured values:
+# Defaults based on the latest measured values with this sensor
+# (higher voltage when wetter):
 # - dry (0%): 2.750V ≈ 0.833 normalized
-# - wet (100%): 1.136V ≈ 0.344 normalized
+# - wet (100%): 3.120V ≈ 0.945 normalized
 ZONE_SOIL_MOISTURE_DRY_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_DRY_VALUE', '0.833'))
-ZONE_SOIL_MOISTURE_WET_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_WET_VALUE', '0.344'))
+ZONE_SOIL_MOISTURE_WET_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_WET_VALUE', '0.945'))
 ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '680.0'))  # Zone altitude in meters above sea level
 ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '25.0'))  # Zone slope angle in degrees
 ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '1200.0'))  # Zone area in square meters
