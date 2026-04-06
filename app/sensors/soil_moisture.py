@@ -63,10 +63,11 @@ class SoilMoistureSensor(BaseSensor):
         raw_value = raw_data['value']
         
         # Convert normalized value to voltage for validation
-        voltage = raw_value * 3.3  # Convert normalized (0-1) to voltage (0-3.3V)
+        # ADS1115 normalization uses 0–3.3V range.
+        voltage = raw_value * 3.3
         
-        # Check if voltage is below 1V (normalized < 0.303) - indicates unconnected sensor
-        # 100% moisture is around 1.14V (0.344 normalized), so values below 1V are invalid
+        # Basic sanity check for disconnected/faulty sensor:
+        # values significantly below ~1V are considered invalid.
         if voltage < 1.0:  # 1V threshold
             self.mark_failure()
             raise Exception(
@@ -77,23 +78,12 @@ class SoilMoistureSensor(BaseSensor):
         # Apply noise filtering
         filtered_value = self.noise_filter.filter(raw_value)
         
-        # Check if filtered value is below wet_value (calibrated 100% point)
-        # This indicates the sensor is reading below the calibrated wet point, which shouldn't happen
-        # for a properly connected sensor (unless it's in a medium wetter than water)
-        if filtered_value < self.wet_value:
-            self.mark_failure()
-            raise Exception(
-                f"Soil moisture sensor {self.sensor_id} reading below calibrated wet value "
-                f"(raw: {filtered_value:.4f} < wet_value: {self.wet_value:.4f}, voltage: {filtered_value*3.3:.3f}V). "
-                f"Sensor may be unconnected or faulty."
-            )
-        
         # Convert to percentage using calibration
         # Map from [dry_value, wet_value] to [0%, 100%]
         if self.wet_value == self.dry_value:
             moisture_percent = 0.0
         else:
-            # Normalize to 0-1 range
+            # Normalize to 0-1 range using configured dry/wet calibration.
             normalized = (filtered_value - self.dry_value) / (self.wet_value - self.dry_value)
             # Clamp to 0-1 and convert to percentage
             moisture_percent = max(0.0, min(100.0, normalized * 100.0))

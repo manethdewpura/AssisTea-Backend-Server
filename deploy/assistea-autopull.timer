@@ -1,0 +1,11 @@
+[Unit]
+Description=Run AssisTea auto pull every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=assistea-autopull.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
