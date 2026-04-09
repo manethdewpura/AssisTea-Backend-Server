@@ -288,8 +288,10 @@ class WeatherMLPredictor:
         
         # Convert predictions to weather records
         predicted_records = []
-        base_timestamp = historical_data[-1].get('timestamp', int(datetime.now().timestamp() * 1000))
-        base_dt = datetime.fromtimestamp(base_timestamp / 1000)
+        # Anchor prediction horizon to "now" to guarantee next-24h outputs.
+        # Do not anchor to latest historical row because it can drift when
+        # history includes stale or forecast-derived timestamps.
+        base_dt = datetime.now()
         
         for i, interval_hours in enumerate(self.prediction_intervals):
             # Calculate prediction timestamp

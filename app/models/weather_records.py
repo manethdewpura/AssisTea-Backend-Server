@@ -487,43 +487,11 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
                     'coord_lon': forecast.city_coord_lon
                 }
         
-        # Strategy 2b: If still insufficient, use most recent forecast records (even if future)
-        # These are from the last API call before connection loss
-        if len(forecast_data_list) < needed_records:
-            remaining_needed = needed_records - len(forecast_data_list)
-            
-            # Get the most recent forecast data (closest to "now")
-            # This uses the last API call's forecast data as historical input
-            recent_forecasts = query_forecast.filter(
-                WeatherForecast.forecast_dt >= cutoff_timestamp_seconds
-            ).order_by(WeatherForecast.forecast_dt.asc()).limit(remaining_needed).all()
-            
-            for forecast in recent_forecasts:
-                forecast_timestamp_ms = forecast.forecast_dt * 1000
-                forecast_data_list.append({
-                    'timestamp': forecast_timestamp_ms,
-                    'temp': forecast.temp,
-                    'feels_like': forecast.feels_like,
-                    'temp_min': forecast.temp_min,
-                    'temp_max': forecast.temp_max,
-                    'pressure': forecast.pressure,
-                    'humidity': forecast.humidity,
-                    'wind_speed': forecast.wind_speed,
-                    'wind_deg': forecast.wind_deg,
-                    'rain_1h': forecast.rain_1h or 0.0,
-                    'rain_3h': forecast.rain_3h or 0.0,
-                    'clouds_all': forecast.clouds_all or 0,
-                    'source': 'forecast_recent'  # Mark as recent forecast data
-                })
-                
-                if not city_info:
-                    city_info = {
-                        'id': forecast.city_id,
-                        'name': forecast.city_name,
-                        'country': forecast.city_country or '',
-                        'coord_lat': forecast.city_coord_lat,
-                        'coord_lon': forecast.city_coord_lon
-                    }
+        # NOTE:
+        # We intentionally do not use future forecast rows as historical ML input.
+        # Mixing future timestamps into history causes horizon drift (e.g., "next 24h"
+        # becoming 3-5 days ahead). If current + past forecast are insufficient, we
+        # rely on interpolation/ML-recursive data or fallback to provider forecast.
         
         # Merge forecast data with current data, ensuring chronological order
         historical_data.extend(forecast_data_list)
@@ -579,7 +547,7 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
         
         # Remove duplicates (same timestamp) - prefer 'current' over 'forecast' over 'ml_prediction'
         seen_timestamps = {}
-        source_priority = {'current': 3, 'forecast_past': 2, 'forecast_recent': 1, 'ml_prediction': 0}
+        source_priority = {'current': 3, 'forecast_past': 2, 'ml_prediction': 0}
         
         for record in historical_data:
             # Use exact timestamp - only deduplicate if timestamps are exactly the same
