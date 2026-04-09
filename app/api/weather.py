@@ -752,14 +752,14 @@ def get_latest_forecast():
             forecast_list.append({
                 'dt': forecast.forecast_dt,
                 'dt_txt': forecast.forecast_dt_txt,
-                'main': forecast_dict['main'],
-                'weather': [forecast_dict['weather']],
-                'clouds': forecast_dict['clouds'],
-                'wind': forecast_dict['wind'],
-                'visibility': forecast_dict['visibility'],
-                'pop': forecast_dict['pop'],
-                'rain': forecast_dict['rain'],
-                'snow': forecast_dict['snow']
+                'main': forecast_dict.get('main', {}),
+                'weather': [forecast_dict.get('weather', {})],
+                'clouds': forecast_dict.get('clouds', {'all': 0}),
+                'wind': forecast_dict.get('wind', {'speed': 0.0, 'deg': 0.0}),
+                'visibility': forecast_dict.get('visibility', 10000),
+                'pop': forecast_dict.get('pop', 0.0),
+                'rain': forecast_dict.get('rain'),
+                'snow': forecast_dict.get('snow')
             })
         
         return jsonify({
@@ -1372,22 +1372,20 @@ def get_latest_predictions():
                 'predicted_at': pred.timestamp
             })
         
-        # future predictions only, deduplicated by time slot
+        # Keep only predictions strictly in the next 24 hours from now.
         current_time_ms = int(current_time_epoch * 1000)
-        
-         # Filter to future predictions only (measured_at > now)
-        future_only = [p for p in predictions if p['measured_at'] > current_time_ms]
+        next_24h_ms = current_time_ms + (24 * 60 * 60 * 1000)
+        future_only = [
+            p for p in predictions
+            if p['measured_at'] > current_time_ms and p['measured_at'] <= next_24h_ms
+        ]
         
         # Deduplicate overlapping time slots (3-hour window = 10,800,000 ms)
         # If multiple predictions exist for the same slot, keep highest confidence
         slot_ms = 3 * 60 * 60 * 1000
         
-        # Determine if we are in fallback mode (all predictions are in the past)
-        # We check the original 'predictions' list because 'future_only' might be empty
-        was_fallback = not any(p['measured_at'] > current_time_ms for p in predictions)
-        
         # Source of predictions for deduplication
-        source_list = predictions if was_fallback else future_only
+        source_list = future_only
         
         deduped = {}
         for p in source_list:
@@ -1405,18 +1403,12 @@ def get_latest_predictions():
                 'predictions': []
             }), 404
         
-        if was_fallback:
-            # All are in the past, pick the most recent
-            primary_prediction = sorted_predictions[-1]
-            # others in reverse chronological order
-            other_predictions = sorted_predictions[:-1][::-1][:7]
-        else:
-            primary_prediction = sorted_predictions[0]
-            other_predictions = sorted_predictions[1:8]
+        primary_prediction = sorted_predictions[0]
+        other_predictions = sorted_predictions[1:8]
         
         return jsonify({
             'success': True,
-            'message': f'Found {len(sorted_predictions)} ML predictions' + (' (Fallback)' if was_fallback else ''),
+            'message': f'Found {len(sorted_predictions)} ML predictions in next 24 hours',
             'current': primary_prediction['data'],
             # Backward compatibility: return both keys
             'best_confidence': primary_prediction['confidence_score'],
