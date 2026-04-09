@@ -922,6 +922,7 @@ def predict_with_ml():
                 existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
                 existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
                 existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                existing_forecast.visibility = pred_record.get('visibility', 10000)
                 existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
                 existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
                 existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
@@ -956,6 +957,7 @@ def predict_with_ml():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
+                    visibility=pred_record.get('visibility', 10000),
                     pop=0.0,
                     raw_data=json.dumps({
                         **pred_record,
@@ -998,7 +1000,7 @@ def predict_with_ml():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
-                    visibility=10000,  # Default visibility
+                    visibility=pred_record.get('visibility', 10000),
                     # ML tracking fields
                     data_source='ml_prediction',
                     is_ml_generated=True,
@@ -1171,6 +1173,7 @@ def auto_predict_if_stale():
                 existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
                 existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
                 existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                existing_forecast.visibility = pred_record.get('visibility', 10000)
                 existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
                 existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
                 existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
@@ -1205,6 +1208,7 @@ def auto_predict_if_stale():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
+                    visibility=pred_record.get('visibility', 10000),
                     pop=0.0,
                     raw_data=json.dumps({
                         **pred_record,
@@ -1247,7 +1251,7 @@ def auto_predict_if_stale():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
-                    visibility=10000,  # Default visibility
+                    visibility=pred_record.get('visibility', 10000),
                     # ML tracking fields
                     data_source='ml_prediction',
                     is_ml_generated=True,

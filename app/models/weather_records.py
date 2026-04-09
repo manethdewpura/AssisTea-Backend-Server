@@ -292,6 +292,38 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
     # Precompute sorted timestamps for O(log n) neighbor lookup
     sorted_timestamps = [rec['timestamp'] for rec in sorted_data]
     
+    def _interpolate_rain_value(
+        before_record: dict,
+        after_record: dict,
+        target_ts: int,
+        key: str
+    ) -> float:
+        """
+        Rain interpolation heuristic:
+        - Both neighbors raining: linear interpolation.
+        - One neighbor raining: exponential decay from that neighbor.
+        - Neither raining: 0.0.
+        """
+        before_val = max(float((before_record or {}).get(key) or 0.0), 0.0)
+        after_val = max(float((after_record or {}).get(key) or 0.0), 0.0)
+        before_ts = before_record.get('timestamp') if before_record else None
+        after_ts = after_record.get('timestamp') if after_record else None
+
+        if before_val > 0.0 and after_val > 0.0 and before_ts is not None and after_ts is not None and after_ts > before_ts:
+            total = after_ts - before_ts
+            weight = (target_ts - before_ts) / total
+            weight = min(max(weight, 0.0), 1.0)
+            return before_val + (after_val - before_val) * weight
+
+        decay_tau_hours = 2.0
+        if before_val > 0.0 and before_ts is not None:
+            delta_hours = max((target_ts - before_ts) / (1000 * 3600), 0.0)
+            return before_val * pow(2.718281828, -delta_hours / decay_tau_hours)
+        if after_val > 0.0 and after_ts is not None:
+            delta_hours = max((after_ts - target_ts) / (1000 * 3600), 0.0)
+            return after_val * pow(2.718281828, -delta_hours / decay_tau_hours)
+        return 0.0
+
     for target_ts in continuous_timeline:
         hour_key = round(target_ts / (3600 * 1000)) * (3600 * 1000)
         
@@ -326,26 +358,23 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
                     # Nearest neighbor for directional/categorical
                     'wind_deg': before_record['wind_deg'] if weight < 0.5 else after_record['wind_deg'],
                     'clouds_all': int(before_record['clouds_all'] + (after_record['clouds_all'] - before_record['clouds_all']) * weight),
-                    # Conservative: no rain interpolation
-                    #TODO: define moreabout the use of rain interpolation
-                    'rain_1h': 0.0,
-                    'rain_3h': 0.0,
+                    'rain_1h': _interpolate_rain_value(before_record, after_record, target_ts, 'rain_1h'),
+                    'rain_3h': _interpolate_rain_value(before_record, after_record, target_ts, 'rain_3h'),
                 }
             elif before_record:
                 # Only before record available - forward fill
                 interpolated_record = deepcopy(before_record)
                 interpolated_record['timestamp'] = target_ts
-                interpolated_record['rain_1h'] = 0.0  # Don't carry forward rain
-                interpolated_record['rain_3h'] = 0.0
+                interpolated_record['rain_1h'] = _interpolate_rain_value(before_record, None, target_ts, 'rain_1h')
+                interpolated_record['rain_3h'] = _interpolate_rain_value(before_record, None, target_ts, 'rain_3h')
             elif after_record:
                 # Only after record available - backward fill
                 interpolated_record = deepcopy(after_record)
                 interpolated_record['timestamp'] = target_ts
-                interpolated_record['rain_1h'] = 0.0
-                interpolated_record['rain_3h'] = 0.0
+                interpolated_record['rain_1h'] = _interpolate_rain_value(None, after_record, target_ts, 'rain_1h')
+                interpolated_record['rain_3h'] = _interpolate_rain_value(None, after_record, target_ts, 'rain_3h')
             else:
                 # No surrounding data - use defaults
-                #ToDO: define moreabout the use of default values
                 interpolated_record = {
                     'timestamp': target_ts,
                     'temp': 25.0,
@@ -613,7 +642,6 @@ def build_historical_data_for_prediction(lookback_hours: int = 48, city_id: int 
     data_source_info['has_sufficient_data'] = len(historical_data) >= lookback_hours  # Need full lookback period
     
     # Calculate data quality rating
-    #TODO: define moreabout the use of data quality rating
     if interpolation_count == 0:
         data_quality = "excellent"
     elif data_source_info['interpolation_ratio'] < 0.2:
