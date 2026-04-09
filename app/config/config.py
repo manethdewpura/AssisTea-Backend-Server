@@ -37,10 +37,12 @@ ADS1115_FERTILIZER_PRESSURE_CHANNEL = int(
 )  # Channel 3 (A3) for fertilizer pump pressure
 
 # Sensor pins (for digital sensors and tank level)
-DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '22'))  # Tank level sensor trigger (TRIG)
-DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo (ECHO)
 # Tank level: ultrasonic sensor measures distance to water surface (cm)
 # Tank full  -> sensor reads 10 cm (water close). Tank empty -> sensor reads 100 cm (water far).
+# Default trigger/echo pins are aligned with the standalone HY-SRF05 diagnostic in `test.py`
+# so a working test setup uses the same wiring as the running server.
+DEFAULT_TANK_LEVEL_TRIGGER_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_TRIGGER_PIN', '17'))  # Tank level sensor trigger (TRIG)
+DEFAULT_TANK_LEVEL_ECHO_PIN = int(os.getenv('DEFAULT_TANK_LEVEL_ECHO_PIN', '27'))  # Tank level sensor echo (ECHO)
 TANK_EMPTY_DISTANCE_CM = float(os.getenv('TANK_EMPTY_DISTANCE_CM', '100.0'))  # Sensor reading when tank is empty (cm)
 TANK_FULL_DISTANCE_CM = float(os.getenv('TANK_FULL_DISTANCE_CM', '10.0'))  # Sensor reading when tank is full (cm)
 
@@ -49,11 +51,12 @@ ZONE_VALVE_GPIO_PIN = int(os.getenv('ZONE_VALVE_GPIO_PIN', '17'))  # GPIO pin fo
 # ADS1115 channel for soil moisture sensor (0-3)
 ZONE_SOIL_MOISTURE_SENSOR_CHANNEL = int(os.getenv('ZONE_SOIL_MOISTURE_SENSOR_CHANNEL', '0'))
 # Soil moisture calibration (normalized ADC reading, 0.0-1.0)
-# Defaults based on the project's measured values:
+# Defaults based on the latest measured values with this sensor
+# (higher voltage when wetter):
 # - dry (0%): 2.750V ≈ 0.833 normalized
-# - wet (100%): 1.136V ≈ 0.344 normalized
+# - wet (100%): 3.120V ≈ 0.945 normalized
 ZONE_SOIL_MOISTURE_DRY_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_DRY_VALUE', '0.833'))
-ZONE_SOIL_MOISTURE_WET_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_WET_VALUE', '0.344'))
+ZONE_SOIL_MOISTURE_WET_VALUE = float(os.getenv('ZONE_SOIL_MOISTURE_WET_VALUE', '0.945'))
 ZONE_ALTITUDE_M = float(os.getenv('ZONE_ALTITUDE_M', '680.0'))  # Zone altitude in meters above sea level
 ZONE_SLOPE_DEGREES = float(os.getenv('ZONE_SLOPE_DEGREES', '25.0'))  # Zone slope angle in degrees
 ZONE_AREA_M2 = float(os.getenv('ZONE_AREA_M2', '1200.0'))  # Zone area in square meters
