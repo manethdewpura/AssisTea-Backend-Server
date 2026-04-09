@@ -45,8 +45,11 @@ class TankLevelSensor(BaseSensor):
         self.gpio.setup_pin(self.trigger_pin, 'output')
         self.gpio.setup_pin(self.echo_pin, 'input')
         
-        # Initialize trigger pin to LOW
+        # Initialize trigger pin to LOW and let the HY-SRF05 settle.
+        # This mirrors the dedicated diagnostic script (`test.py`) which
+        # forces a clean LOW then waits before the first pulse.
         self.gpio.write_pin(self.trigger_pin, False)
+        time.sleep(0.5)
 
     def _read_distance_cm(self) -> float:
         """
@@ -70,6 +73,12 @@ class TankLevelSensor(BaseSensor):
         
         # Real hardware: use digital echo pulse timing (HY-SR05). Disconnected
         # sensor will timeout here and raise, so health is marked unhealthy.
+        #
+        # Ensure trigger is LOW and give the sensor a brief settling time,
+        # just like the standalone diagnostic script.
+        self.gpio.write_pin(self.trigger_pin, False)
+        time.sleep(0.05)
+
         # Send trigger pulse (10 microseconds)
         self.gpio.write_pin(self.trigger_pin, True)
         time.sleep(0.00001)  # 10 microseconds
@@ -77,8 +86,10 @@ class TankLevelSensor(BaseSensor):
         
         # Wait for echo to go HIGH
         timeout = time.time() + 0.1  # 100ms timeout
+        start_wait = time.time()
         while not self.gpio.read_pin(self.echo_pin) and time.time() < timeout:
-            pass
+            # Busy-wait loop similar to test.py, but keep track of start time
+            start_wait = time.time()
         
         if time.time() >= timeout:
             raise TimeoutError("Echo signal timeout")
