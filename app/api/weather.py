@@ -752,14 +752,14 @@ def get_latest_forecast():
             forecast_list.append({
                 'dt': forecast.forecast_dt,
                 'dt_txt': forecast.forecast_dt_txt,
-                'main': forecast_dict['main'],
-                'weather': [forecast_dict['weather']],
-                'clouds': forecast_dict['clouds'],
-                'wind': forecast_dict['wind'],
-                'visibility': forecast_dict['visibility'],
-                'pop': forecast_dict['pop'],
-                'rain': forecast_dict['rain'],
-                'snow': forecast_dict['snow']
+                'main': forecast_dict.get('main', {}),
+                'weather': [forecast_dict.get('weather', {})],
+                'clouds': forecast_dict.get('clouds', {'all': 0}),
+                'wind': forecast_dict.get('wind', {'speed': 0.0, 'deg': 0.0}),
+                'visibility': forecast_dict.get('visibility', 10000),
+                'pop': forecast_dict.get('pop', 0.0),
+                'rain': forecast_dict.get('rain'),
+                'snow': forecast_dict.get('snow')
             })
         
         return jsonify({
@@ -922,6 +922,7 @@ def predict_with_ml():
                 existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
                 existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
                 existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                existing_forecast.visibility = pred_record.get('visibility', 10000)
                 existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
                 existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
                 existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
@@ -956,6 +957,7 @@ def predict_with_ml():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
+                    visibility=pred_record.get('visibility', 10000),
                     pop=0.0,
                     raw_data=json.dumps({
                         **pred_record,
@@ -998,7 +1000,7 @@ def predict_with_ml():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
-                    visibility=10000,  # Default visibility
+                    visibility=pred_record.get('visibility', 10000),
                     # ML tracking fields
                     data_source='ml_prediction',
                     is_ml_generated=True,
@@ -1171,6 +1173,7 @@ def auto_predict_if_stale():
                 existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
                 existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
                 existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                existing_forecast.visibility = pred_record.get('visibility', 10000)
                 existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
                 existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
                 existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
@@ -1205,6 +1208,7 @@ def auto_predict_if_stale():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
+                    visibility=pred_record.get('visibility', 10000),
                     pop=0.0,
                     raw_data=json.dumps({
                         **pred_record,
@@ -1247,7 +1251,7 @@ def auto_predict_if_stale():
                     rain_1h=pred_record.get('rain_1h', 0.0),
                     rain_3h=pred_record.get('rain_3h', 0.0),
                     clouds_all=pred_record.get('clouds_all', 0),
-                    visibility=10000,  # Default visibility
+                    visibility=pred_record.get('visibility', 10000),
                     # ML tracking fields
                     data_source='ml_prediction',
                     is_ml_generated=True,
@@ -1300,17 +1304,19 @@ def auto_predict_if_stale():
 def get_latest_predictions():
     """
     Get the latest ML-predicted weather data with confidence scores.
-    Returns predictions from the last 24 hours, sorted by time proximity.
+    Returns predictions in the next 24 hours, sorted by time proximity.
     """
     try:
-        # Get predictions from the last 24 hours
+        # Get predictions strictly within the next 24 hours
         current_time_epoch = time.time()
-        cutoff_timestamp = int((current_time_epoch - 24 * 3600) * 1000)
+        current_time_ms = int(current_time_epoch * 1000)
+        next_24h_ms = current_time_ms + (24 * 60 * 60 * 1000)
         
         # Query ML-generated records from weather_current, sorted by time (newest first)
         ml_predictions = WeatherCurrent.query.filter(
             WeatherCurrent.is_ml_generated == True,
-            WeatherCurrent.measured_at >= cutoff_timestamp
+            WeatherCurrent.measured_at > current_time_ms,
+            WeatherCurrent.measured_at <= next_24h_ms,
         ).order_by(
             WeatherCurrent.measured_at.desc()
         ).all()
@@ -1372,22 +1378,12 @@ def get_latest_predictions():
                 'predicted_at': pred.timestamp
             })
         
-        # future predictions only, deduplicated by time slot
-        current_time_ms = int(current_time_epoch * 1000)
-        
-         # Filter to future predictions only (measured_at > now)
-        future_only = [p for p in predictions if p['measured_at'] > current_time_ms]
-        
         # Deduplicate overlapping time slots (3-hour window = 10,800,000 ms)
         # If multiple predictions exist for the same slot, keep highest confidence
         slot_ms = 3 * 60 * 60 * 1000
         
-        # Determine if we are in fallback mode (all predictions are in the past)
-        # We check the original 'predictions' list because 'future_only' might be empty
-        was_fallback = not any(p['measured_at'] > current_time_ms for p in predictions)
-        
         # Source of predictions for deduplication
-        source_list = predictions if was_fallback else future_only
+        source_list = predictions
         
         deduped = {}
         for p in source_list:
@@ -1405,18 +1401,12 @@ def get_latest_predictions():
                 'predictions': []
             }), 404
         
-        if was_fallback:
-            # All are in the past, pick the most recent
-            primary_prediction = sorted_predictions[-1]
-            # others in reverse chronological order
-            other_predictions = sorted_predictions[:-1][::-1][:7]
-        else:
-            primary_prediction = sorted_predictions[0]
-            other_predictions = sorted_predictions[1:8]
+        primary_prediction = sorted_predictions[0]
+        other_predictions = sorted_predictions[1:8]
         
         return jsonify({
             'success': True,
-            'message': f'Found {len(sorted_predictions)} ML predictions' + (' (Fallback)' if was_fallback else ''),
+            'message': f'Found {len(sorted_predictions)} ML predictions in next 24 hours',
             'current': primary_prediction['data'],
             # Backward compatibility: return both keys
             'best_confidence': primary_prediction['confidence_score'],

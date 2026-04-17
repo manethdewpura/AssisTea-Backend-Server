@@ -50,6 +50,68 @@ class WeatherMLPredictor:
         
         self._load_model()
         self._load_metadata()
+
+    @staticmethod
+    def _is_daytime_hour(hour: int) -> bool:
+        """Return True if the provided hour is considered daytime."""
+        return 6 <= hour < 18
+
+    def _classify_weather_condition(
+        self,
+        rain_1h: float,
+        clouds: int,
+        humidity: float,
+        wind_speed: float,
+        pred_hour: int
+    ) -> tuple[str, str, str]:
+        """
+        Classify weather condition and icon from predicted features.
+
+        Returns:
+            Tuple of (weather_main, weather_description, weather_icon)
+        """
+        icon_suffix = "d" if self._is_daytime_hour(pred_hour) else "n"
+
+        # Prioritize precipitation-related conditions first.
+        if rain_1h >= 7.5:
+            return "Rain", "heavy rain", f"10{icon_suffix}"
+        if rain_1h >= 2.5:
+            return "Rain", "moderate rain", f"10{icon_suffix}"
+        if rain_1h > 0.5:
+            return "Rain", "light rain", f"10{icon_suffix}"
+        if rain_1h >= 0.1:
+            return "Drizzle", "light drizzle", f"09{icon_suffix}"
+
+        # High humidity + calm wind can indicate low-lying mist/fog.
+        if humidity > 95.0 and wind_speed <= 2.0:
+            return "Mist", "mist", f"50{icon_suffix}"
+
+        # Refined cloud cover thresholds.
+        if clouds >= 85:
+            return "Clouds", "overcast clouds", f"04{icon_suffix}"
+        if clouds >= 65:
+            return "Clouds", "broken clouds", f"04{icon_suffix}"
+        if clouds >= 30:
+            return "Clouds", "scattered clouds", f"03{icon_suffix}"
+        if clouds >= 10:
+            return "Clouds", "few clouds", f"02{icon_suffix}"
+
+        return "Clear", "clear sky", f"01{icon_suffix}"
+
+    @staticmethod
+    def _estimate_visibility(rain_1h: float, humidity: float) -> int:
+        """
+        Estimate horizontal visibility (meters) from predicted conditions.
+        """
+        if humidity > 95.0:
+            return 4000
+        if rain_1h >= 7.5:
+            return 2000
+        if rain_1h >= 2.5:
+            return 5000
+        if rain_1h > 0.1:
+            return 7000
+        return 10000
     
     def _load_model(self):
         """Load TFLite model"""
@@ -288,8 +350,10 @@ class WeatherMLPredictor:
         
         # Convert predictions to weather records
         predicted_records = []
-        base_timestamp = historical_data[-1].get('timestamp', int(datetime.now().timestamp() * 1000))
-        base_dt = datetime.fromtimestamp(base_timestamp / 1000)
+        # Anchor prediction horizon to "now" to guarantee next-24h outputs.
+        # Do not anchor to latest historical row because it can drift when
+        # history includes stale or forecast-derived timestamps.
+        base_dt = datetime.now()
         
         for i, interval_hours in enumerate(self.prediction_intervals):
             # Calculate prediction timestamp
@@ -307,28 +371,15 @@ class WeatherMLPredictor:
             humidity = float(feature_dict.get('humidity', 80.0))
             clouds = int(feature_dict.get('clouds_all', 75.0))
             rain_1h = float(feature_dict.get('rain_1h', 0.0))
-            
-            # Simple weather condition logic (can be improved)
-            if rain_1h > 0.5:
-                weather_main = "Rain"
-                weather_description = "light rain" if rain_1h < 2.5 else "moderate rain" if rain_1h < 7.5 else "heavy rain"
-                weather_icon = "10d"
-            elif clouds > 75:
-                weather_main = "Clouds"
-                weather_description = "overcast clouds"
-                weather_icon = "04d"
-            elif clouds > 50:
-                weather_main = "Clouds"
-                weather_description = "broken clouds"
-                weather_icon = "04d"
-            elif clouds > 25:
-                weather_main = "Clouds"
-                weather_description = "scattered clouds"
-                weather_icon = "03d"
-            else:
-                weather_main = "Clear"
-                weather_description = "clear sky"
-                weather_icon = "01d"
+            wind_speed = float(feature_dict.get('wind_speed', 2.0))
+            weather_main, weather_description, weather_icon = self._classify_weather_condition(
+                rain_1h=rain_1h,
+                clouds=clouds,
+                humidity=humidity,
+                wind_speed=wind_speed,
+                pred_hour=pred_dt.hour
+            )
+            visibility = self._estimate_visibility(rain_1h=rain_1h, humidity=humidity)
             
             # Create weather record
             record = {
@@ -341,10 +392,11 @@ class WeatherMLPredictor:
                 'temp_max': float(feature_dict.get('temp_max', temp)),
                 'pressure': float(feature_dict.get('pressure', 1010.0)),
                 'humidity': humidity,
-                'wind_speed': float(feature_dict.get('wind_speed', 2.0)),
+                'wind_speed': wind_speed,
                 'wind_deg': float(feature_dict.get('wind_deg', 220.0)),
                 'rain_1h': rain_1h,
                 'rain_3h': float(feature_dict.get('rain_3h', 0.0)),
+                'visibility': visibility,
                 'clouds_all': clouds,
                 'weather_main': weather_main,
                 'weather_description': weather_description,
