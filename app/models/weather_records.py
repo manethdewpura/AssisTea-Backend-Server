@@ -1,10 +1,12 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import logging
+import math
 from copy import deepcopy
 from bisect import bisect_left
 
 db = SQLAlchemy()
+RAIN_INTERPOLATION_DECAY_TAU_HOURS = 2.0
 
 
 class WeatherCurrent(db.Model):
@@ -315,13 +317,12 @@ def interpolate_weather_data(historical_data: list, lookback_hours: int = 48) ->
             weight = min(max(weight, 0.0), 1.0)
             return before_val + (after_val - before_val) * weight
 
-        decay_tau_hours = 2.0
         if before_val > 0.0 and before_ts is not None:
             delta_hours = max((target_ts - before_ts) / (1000 * 3600), 0.0)
-            return before_val * pow(2.718281828, -delta_hours / decay_tau_hours)
+            return before_val * math.exp(-delta_hours / RAIN_INTERPOLATION_DECAY_TAU_HOURS)
         if after_val > 0.0 and after_ts is not None:
             delta_hours = max((after_ts - target_ts) / (1000 * 3600), 0.0)
-            return after_val * pow(2.718281828, -delta_hours / decay_tau_hours)
+            return after_val * math.exp(-delta_hours / RAIN_INTERPOLATION_DECAY_TAU_HOURS)
         return 0.0
 
     for target_ts in continuous_timeline:

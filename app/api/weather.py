@@ -1304,17 +1304,19 @@ def auto_predict_if_stale():
 def get_latest_predictions():
     """
     Get the latest ML-predicted weather data with confidence scores.
-    Returns predictions from the last 24 hours, sorted by time proximity.
+    Returns predictions in the next 24 hours, sorted by time proximity.
     """
     try:
-        # Get predictions from the last 24 hours
+        # Get predictions strictly within the next 24 hours
         current_time_epoch = time.time()
-        cutoff_timestamp = int((current_time_epoch - 24 * 3600) * 1000)
+        current_time_ms = int(current_time_epoch * 1000)
+        next_24h_ms = current_time_ms + (24 * 60 * 60 * 1000)
         
         # Query ML-generated records from weather_current, sorted by time (newest first)
         ml_predictions = WeatherCurrent.query.filter(
             WeatherCurrent.is_ml_generated == True,
-            WeatherCurrent.measured_at >= cutoff_timestamp
+            WeatherCurrent.measured_at > current_time_ms,
+            WeatherCurrent.measured_at <= next_24h_ms,
         ).order_by(
             WeatherCurrent.measured_at.desc()
         ).all()
@@ -1376,20 +1378,12 @@ def get_latest_predictions():
                 'predicted_at': pred.timestamp
             })
         
-        # Keep only predictions strictly in the next 24 hours from now.
-        current_time_ms = int(current_time_epoch * 1000)
-        next_24h_ms = current_time_ms + (24 * 60 * 60 * 1000)
-        future_only = [
-            p for p in predictions
-            if p['measured_at'] > current_time_ms and p['measured_at'] <= next_24h_ms
-        ]
-        
         # Deduplicate overlapping time slots (3-hour window = 10,800,000 ms)
         # If multiple predictions exist for the same slot, keep highest confidence
         slot_ms = 3 * 60 * 60 * 1000
         
         # Source of predictions for deduplication
-        source_list = future_only
+        source_list = predictions
         
         deduped = {}
         for p in source_list:
