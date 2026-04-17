@@ -138,7 +138,6 @@ class MLBackgroundTask:
             interpolation_ratio = data_source_info.get('interpolation_ratio', 0)
             if interpolation_ratio > 0:
                 # Reduce confidence by interpolation_ratio * 0.3 (max 30% penalty)
-                #TODO: define moreabout the use of max 30% penalty
                 interpolation_penalty = interpolation_ratio * 0.3
                 base_confidence = base_confidence * (1 - interpolation_penalty)
                 logger.info(
@@ -168,6 +167,7 @@ class MLBackgroundTask:
                     existing_forecast.rain_1h = pred_record.get('rain_1h', 0.0)
                     existing_forecast.rain_3h = pred_record.get('rain_3h', 0.0)
                     existing_forecast.clouds_all = pred_record.get('clouds_all', 0)
+                    existing_forecast.visibility = pred_record.get('visibility', 10000)
                     existing_forecast.weather_main = pred_record.get('weather_main', 'Clear')
                     existing_forecast.weather_description = pred_record.get('weather_description', 'clear sky')
                     existing_forecast.weather_icon = pred_record.get('weather_icon', '01d')
@@ -201,6 +201,7 @@ class MLBackgroundTask:
                         rain_1h=pred_record.get('rain_1h', 0.0),
                         rain_3h=pred_record.get('rain_3h', 0.0),
                         clouds_all=pred_record.get('clouds_all', 0),
+                        visibility=pred_record.get('visibility', 10000),
                         pop=0.0,
                         raw_data=json.dumps({
                             **pred_record,
@@ -243,7 +244,7 @@ class MLBackgroundTask:
                         rain_1h=pred_record.get('rain_1h', 0.0),
                         rain_3h=pred_record.get('rain_3h', 0.0),
                         clouds_all=pred_record.get('clouds_all', 0),
-                        visibility=10000,  # Default visibility
+                        visibility=pred_record.get('visibility', 10000),
                         # ML tracking fields
                         data_source='ml_prediction',
                         is_ml_generated=True,
