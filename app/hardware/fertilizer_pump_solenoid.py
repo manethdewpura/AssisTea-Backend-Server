@@ -1,11 +1,20 @@
-"""Fertilizer pump solenoid valve controller."""
+"""Fertilizer pump solenoid valve controller.
+
+This class encapsulates GPIO access and optional persistent state for the
+fertilizer pump solenoid that is opened during fertigation flushes.
+"""
 from app.hardware.gpio_interface import GPIOInterface
 from app.services.solenoid_state_manager import SolenoidStateManager
 from typing import Optional
 
 
 class FertilizerPumpSolenoid:
-    """Controller for fertilizer pump solenoid valve (opens with tank outlet for fertigation flush)."""
+    """Controller for fertilizer pump solenoid valve.
+
+    The solenoid typically opens in sync with the fertigation tank outlet so
+    that fertilizer solution can be flushed through the selected irrigation
+    zone. As with the irrigation solenoid, `True` means energized/open.
+    """
 
     def __init__(self, gpio: GPIOInterface, solenoid_pin: int, state_manager: Optional[SolenoidStateManager] = None):
         """

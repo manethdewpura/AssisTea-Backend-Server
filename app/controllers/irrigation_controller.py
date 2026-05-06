@@ -1,4 +1,15 @@
-"""Irrigation cycle controller."""
+"""Irrigation cycle controller.
+
+This module orchestrates a full irrigation run for a single zone by:
+- Reading soil moisture and (optionally) weather conditions
+- Using the hybrid decision engine to decide whether irrigation is needed
+- Computing the hydraulic pressure required for the configured zone
+- Coordinating valves, pump and the optional pump solenoid
+- Continuously monitoring soil moisture and line pressure to stop safely
+
+It is the main entry point for the irrigation system and is designed to be
+called from the API / scheduler rather than directly from hardware code.
+"""
 import time
 import threading
 from typing import Dict, Optional, Callable
@@ -20,7 +31,15 @@ from app.models.system_log import SystemLog, LogLevel
 
 
 class IrrigationController:
-    """Controller for irrigation cycles."""
+    """High‑level controller for irrigation cycles.
+
+    The controller is deliberately stateful (`is_running`, `current_zone`) so
+    that:
+    - Only one zone can be irrigated at a time (simpler hydraulics)
+    - External callers can poll `get_status()` or stop the run mid‑cycle
+    - Fail‑safes (timeouts, over‑pressure, adequate moisture) can cleanly
+      terminate the operation and log the outcome.
+    """
 
     def __init__(self, pressure_calculator: PressureCalculator,
                  valve_controller: HydraulicValveController,
@@ -202,7 +221,22 @@ class IrrigationController:
         }
 
     def _irrigation_cycle(self, zone_id: int, zone_config: Dict, start_moisture: float, weather_data: Dict = None):
-        """Execute irrigation cycle."""
+        """Execute the full irrigation cycle in phases.
+
+        Phases:
+        1. Log the start and refresh hydraulic geometry from DB so that runtime
+           pipe / flow configuration changes are picked up without a restart.
+        2. Compute the required pressure for the zone, open the pump solenoid
+           (if present), switch the zone valve and start pressure control.
+        3. While running:
+           - Maintain target line pressure (with optional pressure sensor)
+           - Periodically check soil moisture until it reaches the configured
+             adequate threshold
+           - Abort early if we exceed the over‑pressure limit or hit the
+             maximum operation duration.
+        4. Always call `_stop_irrigation` to shut down hardware and log the
+           result, even when an exception is raised.
+        """
         self._over_pressure_notes = None
         try:
             # Log operation start with weather info
@@ -222,10 +256,14 @@ class IrrigationController:
             except Exception:
                 sys_cfg = {}
 
+            # Pull the latest geometry from config; if any key is missing we
+            # fall back to the calculator's current values so existing defaults
+            # keep working.
             pipe_length_m = sys_cfg.get('pipe_length_m', self.pressure_calculator.pipe_length_m)
             pipe_diameter_m = sys_cfg.get('pipe_diameter_m', self.pressure_calculator.pipe_diameter_m)
             flow_rate_m3_per_s = sys_cfg.get('estimated_flow_rate_m3_per_s', self.pressure_calculator.flow_rate_m3_per_s)
-            # If value looks like L/s (e.g. 3 for 3 L/s) not m³/s, convert: 1 m³/s = 1000 L/s
+            # If value looks like L/s (e.g. 3 for 3 L/s) not m³/s, convert:
+            # 1 m³/s = 1000 L/s. This protects against mis‑configured units.
             if flow_rate_m3_per_s > 0.05:
                 flow_rate_m3_per_s = flow_rate_m3_per_s / 1000.0
 
@@ -269,7 +307,7 @@ class IrrigationController:
                                     f'Irrigation timeout reached for zone {zone_id}')
                     break
                 
-                # Maintain pump pressure using system-wide irrigation pressure sensor
+                # Maintain pump pressure using system‑wide irrigation pressure sensor
                 current_pressure = None
                 if self.pressure_sensor:
                     try:
@@ -278,7 +316,9 @@ class IrrigationController:
                     except:
                         pass
                 
-                # Stop irrigation if pressure exceeds calculated target by configured percent
+                # Hard safety: stop irrigation if pressure exceeds calculated
+                # target by the configured percentage to avoid pipe / emitter
+                # damage from over‑pressure.
                 if current_pressure is not None and target_pressure > 0:
                     overpressure_limit = target_pressure * (1.0 + PRESSURE_OVERPRESSURE_STOP_PERCENT / 100.0)
                     if current_pressure > overpressure_limit:

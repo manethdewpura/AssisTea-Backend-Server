@@ -170,7 +170,7 @@ class TestIrrigationAPI:
         from app.api import irrigation as irrigation_api
         
         class BadController:
-            def start_irrigation(self, zone_id, zone_config):
+            def start_irrigation(self, zone_id, zone_config, skip_weather_check=False):
                 # Return a non-JSON-serializable object
                 return {
                     'success': True,

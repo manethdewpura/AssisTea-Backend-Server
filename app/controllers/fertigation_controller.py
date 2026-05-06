@@ -1,4 +1,16 @@
-"""Fertigation cycle controller."""
+"""Fertigation cycle controller.
+
+This module coordinates a complete fertigation run by:
+- Isolating all irrigation zones at the start of the cycle
+- Filling the fertilizer mixing tank via the irrigation pump and inlet valve
+- Switching the network so only the target zone is open for fertilizer flow
+- Driving the fertilizer pump at a computed or default flush pressure
+- Monitoring tank level and line pressure to stop at the right time
+
+In contrast to irrigation, the working fluid for the main flush comes from a
+dedicated fertigation tank, and the sequence of inlet / outlet / solenoid
+operations is critical to avoid back‑feeding or cross‑contamination.
+"""
 import time
 import threading
 from typing import Dict, Optional, Callable
@@ -22,7 +34,13 @@ from app.models.system_log import SystemLog, LogLevel
 
 
 class FertigationController:
-    """Controller for fertigation cycles."""
+    """High‑level controller for fertigation cycles.
+
+    The controller manages both hydraulic valves (tank inlet/outlet, zone
+    valves) and two pumps (irrigation and fertilizer) plus their solenoids.
+    It runs the cycle in a background thread so API callers can return quickly
+    while the hardware completes the operation.
+    """
 
     def __init__(self, valve_controller: HydraulicValveController,
                  tank_valve_controller: TankValveController,
@@ -122,7 +140,21 @@ class FertigationController:
         }
 
     def _fertigation_cycle(self, zone_id: int):
-        """Execute fertigation cycle with new flow."""
+        """Execute fertigation cycle with the new flow‑controlled sequence.
+
+        High‑level phases:
+        1. Preparation: close all zones so that filling and flushing do not
+           leak to unintended areas.
+        2. Filling: open tank inlet and run the irrigation pump until the tank
+           is considered "full" based on the level sensor distance.
+        3. Re‑plumbing: stop the irrigation pump, close the inlet, open the
+           outlet and fertilizer solenoid, and reopen only the target zone.
+        4. Flushing: start the fertilizer pump at the calculated or default
+           pressure, monitor tank level until it is effectively empty, and
+           enforce a timeout and over‑pressure limit for safety.
+        5. Cleanup: stop pumps, close valves/solenoids, and log completion or
+           failure including volume estimates when possible.
+        """
         self._over_pressure_notes = None
         try:
             # Log operation start
@@ -146,7 +178,10 @@ class FertigationController:
                 self._log_system(LogLevel.INFO, 'fertigation_controller',
                                f'Irrigation pump started to fill tank at {fill_pressure} kPa')
             
-            # Wait for tank to fill: sensor reads distance; full when distance <= 10 cm
+            # Wait for tank to fill. The ultrasonic sensor reports a distance
+            # from the sensor to the liquid surface:
+            # - Small distance  (near TANK_FULL_DISTANCE_CM)  -> tank is full
+            # - Large distance  (near TANK_EMPTY_DISTANCE_CM) -> tank is empty
             tank_filled = False
             initial_tank_level = None
             fill_start_time = time.time()
@@ -159,7 +194,8 @@ class FertigationController:
                     distance_cm = level_data['value']  # 10 cm = full, 100 cm = empty
                     if distance_cm <= TANK_FULL_DISTANCE_CM + tolerance_cm:
                         tank_filled = True
-                        # Fill depth for volume calc: empty - distance
+                        # Fill depth for volume calculation: "how much liquid"
+                        # is in the tank is approximated as (empty_distance - measured_distance).
                         initial_tank_level = TANK_EMPTY_DISTANCE_CM - distance_cm
                         self._log_system(LogLevel.INFO, 'fertigation_controller',
                                        f'Tank full (sensor {distance_cm:.1f} cm)')
@@ -250,7 +286,9 @@ class FertigationController:
                                    f'Fertigation timeout reached for zone {zone_id}')
                     break
                 
-                # Monitor fertilizer pump pressure if sensor is available
+                # Monitor fertilizer pump pressure if sensor is available.
+                # This mirrors the irrigation controller: we maintain target
+                # pressure and abort on serious over‑pressure.
                 if self.pressure_sensor and self.fertilizer_pump_controller:
                     if time.time() - last_pressure_check >= 2.0:  # Check every 2 seconds
                         try:
@@ -303,7 +341,8 @@ class FertigationController:
                 self._log_system(LogLevel.INFO, 'fertigation_controller',
                                'Fertilizer pump stopped')
 
-            # Close outlet valve and fertilizer pump solenoid together
+            # Close outlet valve and fertilizer pump solenoid together so that
+            # the fertigation circuit is hydraulically isolated at the end.
             self.tank_valve_controller.close_outlet()
             if self.fertilizer_pump_solenoid:
                 self.fertilizer_pump_solenoid.close()
@@ -360,6 +399,8 @@ class FertigationController:
             self.tank_valve_controller.close_all()
             self.valve_controller.close_zone(zone_id)
             
+            # Re‑read level at the end to estimate how much fertilizer
+            # actually left the tank during this run.
             final_tank_level = 0.0
             try:
                 level_data = self.tank_level_sensor.read_standardized()
@@ -368,6 +409,8 @@ class FertigationController:
                 pass
             
             duration = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
+            # Simple volume approximation in "cm depth" units; callers that
+            # know the tank geometry can convert this to litres if needed.
             fertilizer_volume = max(0.0, initial_tank_level - final_tank_level)
             
             if failure_notes:

@@ -1,11 +1,21 @@
-"""Irrigation pump solenoid valve controller."""
+"""Irrigation pump solenoid valve controller.
+
+This abstraction hides the GPIO details for the main irrigation pump solenoid.
+It also optionally persists the last known state via `SolenoidStateManager` so
+that after a restart the solenoid is restored to a safe, known position.
+"""
 from app.hardware.gpio_interface import GPIOInterface
 from app.services.solenoid_state_manager import SolenoidStateManager
 from typing import Optional
 
 
 class IrrigationPumpSolenoid:
-    """Controller for irrigation pump solenoid valve."""
+    """Controller for the irrigation pump solenoid valve.
+
+    The convention used here is:
+    - True  -> solenoid energized, valve open
+    - False -> solenoid de‑energized, valve closed
+    """
 
     def __init__(self, gpio: GPIOInterface, solenoid_pin: int, state_manager: Optional[SolenoidStateManager] = None):
         """
